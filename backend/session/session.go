@@ -179,6 +179,10 @@ type ConnectionConfig struct {
 	// emitted in the terminal (silent degradation). Trusted mode is used as
 	// fallback when MIT-MAGIC-COOKIE-1 cannot be read from $XAUTHORITY.
 	X11Forwarding bool `json:"x11Forwarding,omitempty"`
+	// AgentForwarding exposes the local SSH agent to the remote SSH session
+	// (the equivalent of OpenSSH's -A option). The private keys remain in the
+	// local agent; only signing requests are forwarded.
+	AgentForwarding bool `json:"agentForwarding,omitempty"`
 	// Backspace key byte sequence for terminal-stream types (ssh/telnet/serial).
 	// The translation happens on the frontend in applyBackspaceKey before the
 	// byte hits SessionWrite, so the backend does not read this field — it is

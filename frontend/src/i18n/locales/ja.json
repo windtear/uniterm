@@ -1068,6 +1068,8 @@
   "conn.newlineMode": "改行モード",
   "conn.x11ForwardingDescMac": "XQuartz のインストールと起動が必要",
   "conn.x11Forwarding": "X11 転送",
+  "conn.agentForwarding": "SSH Agent 転送",
+  "conn.agentForwardingDesc": "ローカル SSH Agent をリモートホストに公開します。信頼できるサーバーでのみ有効にしてください",
   "quickCommands.quickCommandsTab": "クイックコマンド",
   "quickCommands.historyTab": "履歴",
   "quickCommands.saveAs": "クイックコマンドに保存",

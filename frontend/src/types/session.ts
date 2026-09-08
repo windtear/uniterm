@@ -135,6 +135,7 @@ export interface ConnectionConfig {
   // (XQuartz on macOS, VcXsrv on Windows). Silent degradation on
   // missing $DISPLAY / xauth — see backend x11_forward.go.
   x11Forwarding?: boolean
+  agentForwarding?: boolean
   // Enable session output log automatically on first connect. Applies
   // to terminal-stream types (ssh/telnet/serial/mosh/local).
   logOnConnect?: boolean

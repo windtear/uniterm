@@ -1073,6 +1073,8 @@
   "conn.newlineMode": "Newline Mode",
   "conn.x11ForwardingDescMac": "requires XQuartz installed and running",
   "conn.x11Forwarding": "X11 Forwarding",
+  "conn.agentForwarding": "SSH Agent Forwarding",
+  "conn.agentForwardingDesc": "Exposes your local SSH agent to the remote host; use only with trusted servers",
   "quickCommands.quickCommandsTab": "Quick Commands",
   "quickCommands.historyTab": "History",
   "quickCommands.saveAs": "Save as Quick Command",

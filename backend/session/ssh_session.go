@@ -259,6 +259,15 @@ func (s *SSHSession) Connect(config ConnectionConfig) error {
 		return fmt.Errorf("new session: %w", err)
 	}
 
+	if config.AgentForwarding {
+		if err := requestAgentForwarding(client, session); err != nil {
+			// Match OpenSSH -A semantics: forwarding failure is visible but does
+			// not discard an otherwise usable SSH connection. This commonly
+			// happens when AllowAgentForwarding is disabled on the server.
+			s.emitData([]byte("\r\n\x1b[33m[ssh agent forwarding: " + err.Error() + "]\x1b[0m\r\n"))
+		}
+	}
+
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
 		ssh.TTY_OP_ISPEED: 38400,

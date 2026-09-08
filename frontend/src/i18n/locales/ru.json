@@ -1048,6 +1048,8 @@
   "conn.ftpEncryption": "Шифрование TLS",
   "conn.ftpEncryptionNone": "Нет",
   "conn.x11Forwarding": "Перенаправление X11",
+  "conn.agentForwarding": "Перенаправление SSH-агента",
+  "conn.agentForwardingDesc": "Предоставляет удалённому узлу доступ к локальному SSH-агенту; включайте только для доверенных серверов",
   "conn.x11ForwardingDescMac": "требуется установленный и запущенный XQuartz",
   "conn.ftpEncryptionAuto": "Если доступно",
   "conn.ftpEncryptionRequired": "Требуется",

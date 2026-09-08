@@ -1073,6 +1073,8 @@
   "conn.newlineMode": "換行模式",
   "conn.x11ForwardingDescMac": "需要安裝並啟動 XQuartz",
   "conn.x11Forwarding": "X11 轉發",
+  "conn.agentForwarding": "SSH Agent 轉發",
+  "conn.agentForwardingDesc": "將本機 SSH Agent 提供給遠端主機，僅在可信伺服器上啟用",
   "quickCommands.quickCommandsTab": "快捷命令",
   "quickCommands.historyTab": "歷史命令",
   "quickCommands.saveAs": "儲存為快捷命令",

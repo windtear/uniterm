@@ -1048,6 +1048,8 @@
   "conn.ftpEncryption": "Cifrado TLS",
   "conn.ftpEncryptionNone": "Ninguno",
   "conn.x11Forwarding": "Reenvío X11",
+  "conn.agentForwarding": "Reenvío del agente SSH",
+  "conn.agentForwardingDesc": "Expone el agente SSH local al host remoto; úselo solo con servidores de confianza",
   "conn.x11ForwardingDescMac": "requiere XQuartz instalado y en ejecución",
   "conn.ftpEncryptionAuto": "Si está disponible",
   "conn.ftpEncryptionRequired": "Obligatorio",

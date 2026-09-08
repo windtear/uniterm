@@ -733,6 +733,7 @@ export namespace session {
 	    s3UrlStyle?: string;
 	    encoding?: string;
 	    x11Forwarding?: boolean;
+	    agentForwarding?: boolean;
 	    backspaceKey?: string;
 	    telnetNegotiationMode?: string;
 	    localEcho?: boolean;
@@ -813,6 +814,7 @@ export namespace session {
 	        this.s3UrlStyle = source["s3UrlStyle"];
 	        this.encoding = source["encoding"];
 	        this.x11Forwarding = source["x11Forwarding"];
+	        this.agentForwarding = source["agentForwarding"];
 	        this.backspaceKey = source["backspaceKey"];
 	        this.telnetNegotiationMode = source["telnetNegotiationMode"];
 	        this.localEcho = source["localEcho"];

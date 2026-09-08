@@ -537,6 +537,10 @@
               <el-switch v-model="form.x11Forwarding" />
               <span v-if="x11HintKey" class="field-hint" style="margin-left: 12px;">{{ t(x11HintKey) }}</span>
             </el-form-item>
+            <el-form-item v-if="form.type === 'ssh'" :label="t('conn.agentForwarding')">
+              <el-switch v-model="form.agentForwarding" />
+              <span class="field-hint" style="margin-left: 12px;">{{ t('conn.agentForwardingDesc') }}</span>
+            </el-form-item>
             <template v-if="form.type === 'ftp'">
               <el-form-item :label="t('conn.ftpEncryption')">
                 <el-select v-model="form.ftpEncryption">
@@ -1029,6 +1033,7 @@ const form = reactive<ConnectionConfig>({
   sftpMaxConcurrency: 5,
   fileTransferProto: 'sftp' as 'sftp' | 'scp',
   x11Forwarding: false,
+  agentForwarding: false,
   ftpEncryption: 'none',
   ftpPassive: true,
   ftpEncoding: 'utf-8',
@@ -1236,6 +1241,7 @@ watch(() => props.editConfig, (config) => {
     form.rdpEnableNLA = config.rdpEnableNLA ?? false
     form.rdpAdminSession = config.rdpAdminSession ?? false
     form.x11Forwarding = config.x11Forwarding ?? false
+    form.agentForwarding = config.agentForwarding ?? false
     // Existing SSH connections without the field default to SFTP (old behavior).
     form.fileTransferProto = config.fileTransferProto ?? 'sftp'
     // Redis key separator defaults to ":" (empty from old connections = ":").
@@ -1385,6 +1391,8 @@ function resetForm() {
   postLoginMode.value = 'script'
   form.sftpMaxConcurrency = 5
   form.fileTransferProto = 'sftp'
+  form.x11Forwarding = false
+  form.agentForwarding = false
   form.ftpEncryption = 'none'
   form.ftpPassive = true
   form.ftpEncoding = 'utf-8'
