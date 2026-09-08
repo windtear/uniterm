@@ -84,17 +84,23 @@ func probeSSH(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	clientConfig := &ssh.ClientConfig{
-		User:            config.User,
-		Auth:            authMethods,
-		Timeout:         15 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	newConfig := func(challenge ssh.KeyboardInteractiveChallenge) sshClientConfigFactory {
+		return func() (*ssh.ClientConfig, func(), error) {
+			authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, challenge)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &ssh.ClientConfig{User: config.User, Auth: authMethods, Timeout: 15 * time.Second, HostKeyCallback: ssh.InsecureIgnoreHostKey()}, cleanup, nil
+		}
 	}
 	// Honor a materialized proxy (set by App.materializeProxy) on the first hop,
 	// mirroring the terminal session's dial path.
-	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
+	var keyboardConfig sshClientConfigFactory
+	if config.AuthType != "kerberos" {
+		keyboardConfig = newConfig(kb)
+	}
+	client, err := dialSSHWithAuthRetry(addr, newConfig(nil), keyboardConfig, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
@@ -111,15 +117,21 @@ func probeSFTP(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	clientConfig := &ssh.ClientConfig{
-		User:            config.User,
-		Auth:            authMethods,
-		Timeout:         15 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	newConfig := func(challenge ssh.KeyboardInteractiveChallenge) sshClientConfigFactory {
+		return func() (*ssh.ClientConfig, func(), error) {
+			authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, challenge)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &ssh.ClientConfig{User: config.User, Auth: authMethods, Timeout: 15 * time.Second, HostKeyCallback: ssh.InsecureIgnoreHostKey()}, cleanup, nil
+		}
 	}
-	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
+	var keyboardConfig sshClientConfigFactory
+	if config.AuthType != "kerberos" {
+		keyboardConfig = newConfig(kb)
+	}
+	client, err := dialSSHWithAuthRetry(addr, newConfig(nil), keyboardConfig, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
@@ -140,15 +152,21 @@ func probeSCP(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	clientConfig := &ssh.ClientConfig{
-		User:            config.User,
-		Auth:            authMethods,
-		Timeout:         15 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	newConfig := func(challenge ssh.KeyboardInteractiveChallenge) sshClientConfigFactory {
+		return func() (*ssh.ClientConfig, func(), error) {
+			authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, challenge)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &ssh.ClientConfig{User: config.User, Auth: authMethods, Timeout: 15 * time.Second, HostKeyCallback: ssh.InsecureIgnoreHostKey()}, cleanup, nil
+		}
 	}
-	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
+	var keyboardConfig sshClientConfigFactory
+	if config.AuthType != "kerberos" {
+		keyboardConfig = newConfig(kb)
+	}
+	client, err := dialSSHWithAuthRetry(addr, newConfig(nil), keyboardConfig, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {

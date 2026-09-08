@@ -21,7 +21,8 @@ export interface ConnectionConfig {
   host: string
   port: number
   user: string
-  authType: 'password' | 'key' | 'keyText' | 'agent' | 'identity'
+  authType: 'password' | 'key' | 'keyText' | 'agent' | 'identity' | 'kerberos'
+  kerberosRealm?: string // realm used for IP targets, e.g. EXAMPLE.COM
   password?: string
   keyPath?: string
   keyContent?: string // inline private-key text (authType === 'keyText')

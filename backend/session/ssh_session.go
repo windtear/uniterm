@@ -217,16 +217,26 @@ func (s *SSHSession) Connect(config ConnectionConfig) error {
 		return answers, nil
 	}
 
-	authMethods, kbAuth := splitSSHAuthMethods(config, kbCallback)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	clientConfig := &ssh.ClientConfig{
-		User:            config.User,
-		Auth:            authMethods,
-		Timeout:         30 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	newConfig := func(challenge ssh.KeyboardInteractiveChallenge) sshClientConfigFactory {
+		return func() (*ssh.ClientConfig, func(), error) {
+			authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, challenge)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &ssh.ClientConfig{
+				User:            config.User,
+				Auth:            authMethods,
+				Timeout:         30 * time.Second,
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			}, cleanup, nil
+		}
 	}
-
-	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
+	var keyboardConfig sshClientConfigFactory
+	if config.AuthType != "kerberos" {
+		keyboardConfig = newConfig(kbCallback)
+	}
+	client, err := dialSSHWithAuthRetry(addr, newConfig(nil), keyboardConfig, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {

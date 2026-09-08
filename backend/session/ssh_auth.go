@@ -7,8 +7,14 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func makeSSHAuthMethods(config ConnectionConfig, kbCallback ssh.KeyboardInteractiveChallenge) []ssh.AuthMethod {
+func makeSSHAuthMethods(config ConnectionConfig, kbCallback ssh.KeyboardInteractiveChallenge) ([]ssh.AuthMethod, error) {
+	methods, _, err := makeSSHAuthMethodsForAttempt(config, kbCallback)
+	return methods, err
+}
+
+func makeSSHAuthMethodsForAttempt(config ConnectionConfig, kbCallback ssh.KeyboardInteractiveChallenge) ([]ssh.AuthMethod, func(), error) {
 	var methods []ssh.AuthMethod
+	cleanup := func() {}
 
 	switch config.AuthType {
 	case "password":
@@ -17,14 +23,23 @@ func makeSSHAuthMethods(config ConnectionConfig, kbCallback ssh.KeyboardInteract
 		if signer, ok := parseAuthKeySigner(config); ok {
 			methods = append(methods, ssh.PublicKeys(signer))
 		}
+	case "kerberos":
+		method, release, err := kerberosAuthMethodWithCleanup(config.Host, config.KerberosRealm)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		cleanup = release
+		methods = append(methods, method)
 	}
 
-	// Keyboard-interactive as fallback for password-less or failed-password scenarios.
-	if kbCallback != nil {
+	// Keyboard-interactive is a fallback for password/key authentication. A
+	// Kerberos-only connection must fail with its GSSAPI error instead of
+	// silently falling through to an SSH password prompt.
+	if kbCallback != nil && config.AuthType != "kerberos" {
 		methods = append(methods, ssh.KeyboardInteractive(kbCallback))
 	}
 
-	return methods
+	return methods, cleanup, nil
 }
 
 // buildAuthMethods returns the auth methods used by non-interactive SIP sessions
@@ -42,6 +57,12 @@ func buildAuthMethods(config ConnectionConfig) ([]ssh.AuthMethod, error) {
 			return nil, utils.UserErr("ssh_key_unavailable", keySourceLabel(config))
 		}
 		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+	case "kerberos":
+		method, err := kerberosAuthMethod(config.Host, config.KerberosRealm)
+		if err != nil {
+			return nil, err
+		}
+		return []ssh.AuthMethod{method}, nil
 	default: // "", "password", "agent" and any unknown type fall back to password
 		return []ssh.AuthMethod{ssh.Password(config.Password)}, nil
 	}

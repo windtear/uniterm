@@ -104,9 +104,9 @@ func TestBuildAuthMethods(t *testing.T) {
 // This is what makes keyText portable across the whole connect surface (#720).
 func TestMakeSSHAuthMethodsKeyText(t *testing.T) {
 	cases := []struct {
-		name       string
-		config     ConnectionConfig
-		wantCount  int
+		name      string
+		config    ConnectionConfig
+		wantCount int
 	}{
 		{"valid plain keyText", ConnectionConfig{AuthType: "keyText", KeyContent: newKeyText(t, "")}, 1},
 		{"valid encrypted keyText + passphrase", ConnectionConfig{AuthType: "keyText", KeyContent: newKeyText(t, "pp"), Password: "pp"}, 1},
@@ -115,10 +115,30 @@ func TestMakeSSHAuthMethodsKeyText(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			methods := makeSSHAuthMethods(tc.config, nil)
+			methods, err := makeSSHAuthMethods(tc.config, nil)
+			if err != nil {
+				t.Fatalf("makeSSHAuthMethods() error = %v", err)
+			}
 			if got := len(methods); got != tc.wantCount {
 				t.Fatalf("makeSSHAuthMethods() returned %d methods, want %d", got, tc.wantCount)
 			}
 		})
+	}
+}
+
+func TestKerberosDoesNotFallBackToKeyboardInteractive(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "missing-krb5.conf")
+	t.Setenv("KRB5_CONFIG", configPath)
+	kb := func(string, string, []string, []bool) ([]string, error) {
+		t.Fatal("keyboard-interactive callback must not be used for Kerberos auth")
+		return nil, nil
+	}
+
+	methods, err := makeSSHAuthMethods(ConnectionConfig{AuthType: "kerberos", Host: "server.example.com"}, kb)
+	if err == nil {
+		t.Fatal("makeSSHAuthMethods() error = nil, want missing Kerberos config error")
+	}
+	if len(methods) != 0 {
+		t.Fatalf("makeSSHAuthMethods() returned %d fallback methods, want 0", len(methods))
 	}
 }

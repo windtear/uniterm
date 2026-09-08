@@ -684,6 +684,7 @@ export namespace session {
 	    port: number;
 	    user: string;
 	    authType: string;
+	    kerberosRealm?: string;
 	    identityId?: string;
 	    password?: string;
 	    keyPath?: string;
@@ -763,6 +764,7 @@ export namespace session {
 	        this.port = source["port"];
 	        this.user = source["user"];
 	        this.authType = source["authType"];
+	        this.kerberosRealm = source["kerberosRealm"];
 	        this.identityId = source["identityId"];
 	        this.password = source["password"];
 	        this.keyPath = source["keyPath"];

@@ -40,6 +40,12 @@ type ConnectionConfig struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	AuthType string `json:"authType"`
+	// AuthType "kerberos" uses the local Kerberos credential cache and
+	// SSH gssapi-with-mic; no password or private key is persisted.
+	// KerberosRealm is appended to the host service principal when Host is an
+	// IP address, producing host/<ip>@<REALM>. Domain-name targets keep their
+	// existing canonicalization behavior.
+	KerberosRealm string `json:"kerberosRealm,omitempty"`
 	// IdentityId references a saved Identity (see identity.go). When set with
 	// AuthType "identity", MaterializeIdentity resolves and injects the
 	// credentials at connect time.
