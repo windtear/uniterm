@@ -71,6 +71,7 @@
   "conn.keyTextReveal": "显示私钥",
   "conn.keyTextHide": "隐藏私钥",
   "conn.kerberos": "Kerberos",
+  "conn.sshAgent": "SSH Agent",
   "conn.kerberosHint": "使用本机 Kerberos 凭据缓存。Windows 自动使用当前登录会话（MSLSA:）；其他系统请先运行 kinit。",
   "conn.kerberosRealm": "Kerberos Realm",
   "conn.kerberosRealmPlaceholder": "例如 EXAMPLE.COM",

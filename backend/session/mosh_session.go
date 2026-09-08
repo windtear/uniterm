@@ -54,11 +54,12 @@ func (s *MoshSession) Connect(config ConnectionConfig) error {
 	}
 
 	// Step 1: SSH to remote and start mosh-server to get key + UDP port.
-	authMethods, err := makeSSHAuthMethods(config, nil)
+	authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, nil)
 	if err != nil {
 		s.setStatus(StatusError)
 		return fmt.Errorf("mosh ssh auth: %w", err)
 	}
+	defer cleanup()
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,

@@ -40,6 +40,8 @@ type ConnectionConfig struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	AuthType string `json:"authType"`
+	// AuthType "agent" uses SSH_AUTH_SOCK on Unix. On Windows it uses Pageant,
+	// falling back to the Windows OpenSSH agent named pipe.
 	// AuthType "kerberos" uses the local Kerberos credential cache and
 	// SSH gssapi-with-mic; no password or private key is persisted.
 	// KerberosRealm is appended to the host service principal when Host is an

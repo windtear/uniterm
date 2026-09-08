@@ -70,6 +70,7 @@
   "conn.importFromFile": "ファイルからインポート",
   "conn.keyTextReveal": "秘密鍵を表示",
   "conn.keyTextHide": "秘密鍵を隠す",
+  "conn.sshAgent": "SSH Agent",
   "conn.cancel": "キャンセル",
   "conn.saveConnect": "保存して接続",
   "conn.save": "保存",

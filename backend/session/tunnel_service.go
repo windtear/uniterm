@@ -53,10 +53,11 @@ func (ts *TunnelService) Start(sessionID string, sshConfig ConnectionConfig, tar
 	}
 
 	// 1. Establish SSH connection
-	authMethods, err := makeSSHAuthMethods(sshConfig, nil)
+	authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(sshConfig, nil)
 	if err != nil {
 		return 0, fmt.Errorf("tunnel ssh auth: %w", err)
 	}
+	defer cleanup()
 	addr := net.JoinHostPort(sshConfig.Host, strconv.Itoa(sshConfig.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            sshConfig.User,

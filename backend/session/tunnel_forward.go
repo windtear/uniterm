@@ -228,7 +228,7 @@ func (ts *TunnelService) dialChain(chain []ConnectionConfig, upstream *SocksProx
 
 	for i, cfg := range chain {
 		addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-		authMethods, err := makeSSHAuthMethods(cfg, nil)
+		authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(cfg, nil)
 		if err != nil {
 			closeClients(clients)
 			return nil, nil, fmt.Errorf("ssh auth %s: %w", addr, err)
@@ -241,6 +241,7 @@ func (ts *TunnelService) dialChain(chain []ConnectionConfig, upstream *SocksProx
 			raw, err = prev.Dial("tcp", addr)
 		}
 		if err != nil {
+			cleanup()
 			closeClients(clients)
 			return nil, nil, fmt.Errorf("dial %s: %w", addr, err)
 		}
@@ -253,6 +254,7 @@ func (ts *TunnelService) dialChain(chain []ConnectionConfig, upstream *SocksProx
 			Config:          sshAlgorithms(),
 		}
 		sshConn, chans, reqs, err := ssh.NewClientConn(raw, addr, clientConfig)
+		cleanup()
 		if err != nil {
 			raw.Close()
 			closeClients(clients)

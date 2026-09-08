@@ -26,6 +26,7 @@ require (
 	github.com/studio-b12/gowebdav v0.12.0
 	github.com/unixshells/mosh-go v0.5.2
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
+	github.com/xanzy/ssh-agent v0.3.3
 	github.com/zalando/go-keyring v0.2.8
 	go.bug.st/serial v1.7.1
 	go.mongodb.org/mongo-driver v1.17.9
@@ -91,7 +92,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/unixshells/vt-go v0.1.0 // indirect
-	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect

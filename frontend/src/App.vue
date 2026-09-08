@@ -543,7 +543,7 @@ function needsCredentialCheck(config: ConnectionConfig): boolean {
   if (!inScope) return false
   if ((config.type === 'ssh' || config.type === 'mosh' || config.type === 'scp' || config.type === 'sftp') && (config.authType === 'key' || config.authType === 'keyText')) return false
   // 身份认证：账密来自身份库，由后端 materializeIdentity 解析，无需补全提示
-  if (config.authType === 'identity' || config.authType === 'kerberos') return false
+  if (config.authType === 'identity' || config.authType === 'kerberos' || config.authType === 'agent') return false
   return !config.user || !config.password
 }
 

@@ -71,6 +71,7 @@
   "conn.keyTextReveal": "Show private key",
   "conn.keyTextHide": "Hide private key",
   "conn.kerberos": "Kerberos",
+  "conn.sshAgent": "SSH Agent",
   "conn.kerberosHint": "Uses the local Kerberos credential cache. On Windows, the current sign-in session (MSLSA:) is used automatically; on other systems, run kinit first.",
   "conn.kerberosRealm": "Kerberos Realm",
   "conn.kerberosRealmPlaceholder": "e.g. EXAMPLE.COM",

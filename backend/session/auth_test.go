@@ -142,3 +142,15 @@ func TestKerberosDoesNotFallBackToKeyboardInteractive(t *testing.T) {
 		t.Fatalf("makeSSHAuthMethods() returned %d fallback methods, want 0", len(methods))
 	}
 }
+
+func TestAgentDoesNotFallBackToKeyboardInteractive(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	kb := func(string, string, []string, []bool) ([]string, error) {
+		t.Fatal("keyboard-interactive callback must not be used for agent auth")
+		return nil, nil
+	}
+
+	if _, err := makeSSHAuthMethods(ConnectionConfig{AuthType: "agent"}, kb); err == nil {
+		t.Fatal("makeSSHAuthMethods() error = nil, want missing SSH_AUTH_SOCK error")
+	}
+}

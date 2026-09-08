@@ -81,6 +81,7 @@
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="keyText">{{ t('conn.keyText') }}</el-radio-button>
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="identity">{{ t('conn.identity') }}</el-radio-button>
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="kerberos">{{ t('conn.kerberos') }}</el-radio-button>
+                <el-radio-button v-if="(isWindows || isMac) && (form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop')" label="agent">{{ t('conn.sshAgent') }}</el-radio-button>
                 <el-radio-button v-if="isElasticsearch" label="apikey">{{ t('conn.esAuthApiKey') }}</el-radio-button>
               </el-radio-group>
             </el-form-item>
@@ -706,8 +707,13 @@ onMounted(() => {
 
 // ── Platform detection (before allSubTypes so it's available in computed closures) ──
 const isWindows = ref(/windows/i.test(navigator.userAgent) || /win32/i.test(navigator.platform))
+const isMac = ref(/mac/i.test(navigator.platform))
 const platform = ref<string>('')
-GetPlatform().then(p => { platform.value = p })
+GetPlatform().then(p => {
+  platform.value = p
+  isWindows.value = p === 'windows'
+  isMac.value = p === 'darwin'
+})
 
 // ── Categories & sub-types ──
 interface SubTypeInfo {

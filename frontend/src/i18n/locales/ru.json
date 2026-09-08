@@ -70,6 +70,7 @@
   "conn.importFromFile": "Импортировать из файла",
   "conn.keyTextReveal": "Показать приватный ключ",
   "conn.keyTextHide": "Скрыть приватный ключ",
+  "conn.sshAgent": "SSH Agent",
   "conn.cancel": "Отмена",
   "conn.saveConnect": "Сохранить и подключиться",
   "conn.save": "Сохранить",

@@ -30,12 +30,18 @@ func makeSSHAuthMethodsForAttempt(config ConnectionConfig, kbCallback ssh.Keyboa
 		}
 		cleanup = release
 		methods = append(methods, method)
+	case "agent":
+		method, release, err := localAgentAuthMethod()
+		if err != nil {
+			return nil, cleanup, err
+		}
+		cleanup = release
+		methods = append(methods, method)
 	}
 
-	// Keyboard-interactive is a fallback for password/key authentication. A
-	// Kerberos-only connection must fail with its GSSAPI error instead of
-	// silently falling through to an SSH password prompt.
-	if kbCallback != nil && config.AuthType != "kerberos" {
+	// Kerberos and agent authentication must report their own errors instead
+	// of silently falling through to an SSH password prompt.
+	if kbCallback != nil && config.AuthType != "kerberos" && config.AuthType != "agent" {
 		methods = append(methods, ssh.KeyboardInteractive(kbCallback))
 	}
 
@@ -48,23 +54,35 @@ func makeSSHAuthMethodsForAttempt(config ConnectionConfig, kbCallback ssh.Keyboa
 // (config.Password) authenticates identically everywhere — the "秘钥加密码" case
 // from issue #647. Unlike makeSSHAuthMethods it has no keyboard-interactive
 // fallback (unattended), uses the passphrase as the authentication signal for
-// key files, and treats "agent" as password for backward compatibility.
+// key files.
 func buildAuthMethods(config ConnectionConfig) ([]ssh.AuthMethod, error) {
+	methods, _, err := buildAuthMethodsWithCleanup(config)
+	return methods, err
+}
+
+func buildAuthMethodsWithCleanup(config ConnectionConfig) ([]ssh.AuthMethod, func(), error) {
+	cleanup := func() {}
 	switch config.AuthType {
 	case "key", "keyText":
 		signer, ok := parseAuthKeySigner(config)
 		if !ok {
-			return nil, utils.UserErr("ssh_key_unavailable", keySourceLabel(config))
+			return nil, cleanup, utils.UserErr("ssh_key_unavailable", keySourceLabel(config))
 		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, cleanup, nil
 	case "kerberos":
-		method, err := kerberosAuthMethod(config.Host, config.KerberosRealm)
+		method, release, err := kerberosAuthMethodWithCleanup(config.Host, config.KerberosRealm)
 		if err != nil {
-			return nil, err
+			return nil, cleanup, err
 		}
-		return []ssh.AuthMethod{method}, nil
-	default: // "", "password", "agent" and any unknown type fall back to password
-		return []ssh.AuthMethod{ssh.Password(config.Password)}, nil
+		return []ssh.AuthMethod{method}, release, nil
+	case "agent":
+		method, release, err := localAgentAuthMethod()
+		if err != nil {
+			return nil, cleanup, err
+		}
+		return []ssh.AuthMethod{method}, release, nil
+	default: // "", "password" and any unknown type fall back to password
+		return []ssh.AuthMethod{ssh.Password(config.Password)}, cleanup, nil
 	}
 }
 

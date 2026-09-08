@@ -132,11 +132,12 @@ func (s *MonitorSession) Connect(config ConnectionConfig) error {
 	s.config = config
 	s.title = fmt.Sprintf("%s@%s", config.User, config.Host)
 
-	authMethods, err := buildAuthMethods(config)
+	authMethods, cleanup, err := buildAuthMethodsWithCleanup(config)
 	if err != nil {
 		s.setStatus(StatusError)
 		return err
 	}
+	defer cleanup()
 
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
