@@ -213,7 +213,7 @@ func (s *SSHSession) Connect(config ConnectionConfig) error {
 		return answers, nil
 	}
 
-	authMethods := makeSSHAuthMethods(config, kbCallback)
+	authMethods, kbAuth := splitSSHAuthMethods(config, kbCallback)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
@@ -222,7 +222,7 @@ func (s *SSHSession) Connect(config ConnectionConfig) error {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	client, err := dialSSHWithCipherFallback(addr, clientConfig, func() (net.Conn, error) {
+	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
