@@ -653,8 +653,8 @@ onMounted(async () => {
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
-  /* 约 25 个字符后省略，避免过长主机名撑大标题栏；完整名见 title 悬停 */
-  max-width: 200px;
+  /* Keep a full IPv6 address visible; longer custom names still use ellipsis. */
+  max-width: 300px;
   display: flex;
   align-items: center;
   gap: 6px;
