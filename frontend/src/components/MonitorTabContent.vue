@@ -6,7 +6,10 @@
       <div class="tab-item" :class="{ active: activeTab === 'ports' }" @click="activeTab = 'ports'">{{ t('monitor.ports') }}</div>
       <div class="tab-item" :class="{ active: activeTab === 'disks' }" @click="activeTab = 'disks'">{{ t('monitor.disks') }}</div>
       <div class="tab-item" :class="{ active: activeTab === 'network' }" @click="activeTab = 'network'">{{ t('monitor.networkCards') }}</div>
+      <div class="tab-item" :class="{ active: activeTab === 'services' }" @click="activeTab = 'services'">{{ t('monitor.services') }}</div>
       <div class="tab-item" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'">{{ t('monitor.system') }}</div>
+      <div class="tab-item" :class="{ active: activeTab === 'devices' }" @click="activeTab = 'devices'">{{ t('monitor.devices') }}</div>
+      <div class="tab-item" :class="{ active: activeTab === 'health' }" @click="activeTab = 'health'">{{ t('monitor.health') }}</div>
     </div>
 
     <!-- Performance -->
@@ -222,6 +225,140 @@
       <div v-else class="system-loading">{{ t('monitor.loading') }}</div>
     </div>
 
+    <!-- Services -->
+    <div v-show="activeTab === 'services'" class="tab-pane services-pane" @contextmenu.prevent="showContextMenu($event)">
+      <div class="od-toolbar">
+        <el-input v-model="serviceSearch" :placeholder="t('monitor.searchService')" clearable class="od-search" />
+        <el-button :icon="RefreshRight" :loading="loadingServices" @click="fetchServices">
+          {{ t('monitor.refresh') }}
+        </el-button>
+      </div>
+      <el-table :data="filteredServices" size="small" v-loading="loadingServices" height="calc(100% - 36px)" class="od-table" @row-click="onServiceRowClick">
+        <el-table-column prop="name" :label="t('monitor.service.name')" sortable min-width="220" />
+        <el-table-column prop="active" :label="t('monitor.service.active')" sortable width="100">
+          <template #default="{ row }">
+            <span class="svc-state" :class="serviceStateClass(row)">{{ row.active }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="enabled" :label="t('monitor.service.enabled')" sortable width="110">
+          <template #default="{ row }">{{ row.enabled || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="description" :label="t('monitor.service.description')" min-width="220" show-overflow-tooltip />
+        <el-table-column :label="t('monitor.service.actions')" width="120" align="center">
+          <template #default="{ row }">
+            <el-button size="small" @click.stop="onServiceActionMenu(row, $event)">
+              {{ t('monitor.service.actions') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- Devices -->
+    <div v-show="activeTab === 'devices'" class="tab-pane devices-pane" @contextmenu.prevent="showContextMenu($event)">
+      <div class="od-toolbar">
+        <el-input v-model="deviceSearch" :placeholder="t('monitor.searchDevice')" clearable class="od-search" />
+        <el-button :icon="RefreshRight" :loading="loadingDevices" @click="fetchDevices">
+          {{ t('monitor.refresh') }}
+        </el-button>
+      </div>
+      <el-table :data="deviceTreeData" row-key="rowKey" :tree-props="{ children: 'children' }" size="small" v-loading="loadingDevices" height="calc(100% - 36px)" class="od-table">
+        <el-table-column prop="id" :label="t('monitor.device.slot')" sortable width="150" show-overflow-tooltip />
+        <el-table-column prop="class" :label="t('monitor.device.class')" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.isGroup">{{ t('monitor.device.cat.' + row.category) }} ({{ row.count }})</span>
+            <span v-else>{{ row.class }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="vendor" :label="t('monitor.device.vendor')" sortable min-width="150" show-overflow-tooltip />
+        <el-table-column prop="product" :label="t('monitor.device.device')" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="driver" :label="t('monitor.device.driver')" sortable width="120" show-overflow-tooltip />
+        <el-table-column prop="serial" :label="t('monitor.device.serial')" width="140" show-overflow-tooltip />
+        <el-table-column prop="capacity" :label="t('monitor.device.capacity')" sortable width="100" />
+        <el-table-column prop="rev" :label="t('monitor.device.rev')" width="90" show-overflow-tooltip />
+      </el-table>
+    </div>
+
+    <!-- Hardware health -->
+    <div v-show="activeTab === 'health'" class="tab-pane health-pane" @contextmenu.prevent="showContextMenu($event)">
+      <!-- Top: device identity (FRU + IPMI LAN), each card loads and refreshes independently -->
+      <div class="health-top">
+        <div class="health-cards">
+          <div class="health-card">
+            <div class="health-card-header">
+              <span class="health-card-title">{{ t('monitor.health.fru') }}</span>
+              <el-button link :icon="RefreshRight" :loading="loadingHardwareFru" @click="fetchHardwareFru" />
+            </div>
+            <div class="health-card-body" v-loading="loadingHardwareFru">
+              <template v-if="hardwareFru">
+                <div class="info-grid">
+                  <div class="system-row">
+                    <span class="system-row-label">{{ t('monitor.health.product') }}</span>
+                    <span class="system-row-value">{{ hardwareFru.product || '-' }}</span>
+                  </div>
+                  <div class="system-row">
+                    <span class="system-row-label">{{ t('monitor.health.manufacturer') }}</span>
+                    <span class="system-row-value">{{ hardwareFru.manufacturer || '-' }}</span>
+                  </div>
+                  <div class="system-row">
+                    <span class="system-row-label">{{ t('monitor.health.serial') }}</span>
+                    <span class="system-row-value">{{ hardwareFru.serial || '-' }}</span>
+                  </div>
+                  <div class="system-row">
+                    <span class="system-row-label">{{ t('monitor.health.partNumber') }}</span>
+                    <span class="system-row-value">{{ hardwareFru.partNumber || '-' }}</span>
+                  </div>
+                </div>
+              </template>
+              <div v-else-if="!loadingHardwareFru" class="health-hint">{{ t('monitor.health.noIpmi') }}</div>
+            </div>
+          </div>
+          <div class="health-card">
+            <div class="health-card-header">
+              <span class="health-card-title">{{ t('monitor.health.lan') }}</span>
+              <el-button link :icon="RefreshRight" :loading="loadingHardwareLan" @click="fetchHardwareLan" />
+            </div>
+            <div class="health-card-body" v-loading="loadingHardwareLan">
+              <div v-if="hardwareLan.length" class="info-grid">
+                <div v-for="f in hardwareLan" :key="f.key" class="system-row">
+                  <span class="system-row-label">{{ f.key }}</span>
+                  <span class="system-row-value">{{ f.value }}</span>
+                </div>
+              </div>
+              <div v-else-if="!loadingHardwareLan" class="health-hint">{{ t('monitor.health.noIpmi') }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom: sensors, loads and refreshes independently -->
+      <div class="health-bottom">
+        <div class="health-card-header">
+          <span class="health-card-title">{{ t('monitor.health.sensors') }}</span>
+          <div class="health-card-actions">
+            <el-input v-model="sensorSearch" :placeholder="t('monitor.searchSensor')" clearable class="health-search" />
+            <el-button link :icon="RefreshRight" :loading="loadingHardwareSensors" @click="fetchHardwareSensors" />
+          </div>
+        </div>
+        <div v-if="hardwareSensors && !hardwareSensors.hasIpmi" class="health-hint health-bottom-hint">
+          {{ t('monitor.health.noIpmi') }}
+        </div>
+        <el-table v-if="hardwareSensors && hardwareSensors.sensors.length" :data="filteredSensors" size="small" v-loading="loadingHardwareSensors" height="calc(100% - 36px)" class="od-table health-table">
+          <el-table-column prop="name" :label="t('monitor.health.name')" sortable min-width="160" />
+          <el-table-column prop="value" :label="t('monitor.health.value')" min-width="140" />
+          <el-table-column prop="unit" :label="t('monitor.health.unit')" width="110">
+            <template #default="{ row }">{{ row.unit || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="status" :label="t('monitor.health.status')" width="110">
+            <template #default="{ row }">
+              <span class="svc-state" :class="sensorStatusClass(row.status)">{{ row.status }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="source" :label="t('monitor.health.source')" width="110" />
+        </el-table>
+      </div>
+    </div>
+
     <!-- Process Detail Panel (inside monitor-tab) -->
     <div class="detail-drawer-backdrop" :class="{ open: detailDrawerVisible }" @click="detailDrawerVisible = false"></div>
     <div class="detail-drawer" :class="{ open: detailDrawerVisible }">
@@ -326,6 +463,78 @@
       </template>
     </el-dialog>
 
+    <!-- Service Action Confirmation Dialog -->
+    <el-dialog append-to-body v-model="serviceDialogVisible" :title="serviceActionCmd ? t('monitor.service.' + serviceActionCmd) : ''" width="360px" align-center>
+      <p>{{ serviceActionMessage }}</p>
+      <template #footer>
+        <el-button @click="serviceDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="confirmServiceAction">{{ t('common.confirm') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Service Detail Drawer (slides out like the process detail drawer);
+         two tabs: properties detail / k8s-style journal logs -->
+    <div class="detail-drawer-backdrop" :class="{ open: serviceDetailVisible }" @click="serviceDetailVisible = false"></div>
+    <div class="detail-drawer" :class="{ open: serviceDetailVisible }" :style="serviceDetailVisible ? { width: svcDrawerWidth + 'px' } : undefined">
+      <div class="svc-resizer" @mousedown="onServiceResizeStart"></div>
+      <div class="detail-drawer-header">
+        <span class="detail-drawer-title">{{ serviceDetailName }}</span>
+        <el-button link @click="serviceDetailVisible = false">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+      <div class="svc-drawer-tabs">
+        <div class="svc-tab" :class="{ active: svcDrawerTab === 'detail' }" @click="svcDrawerTab = 'detail'">{{ t('monitor.service.detail') }}</div>
+        <div class="svc-tab" :class="{ active: svcDrawerTab === 'logs' }" @click="onServiceLogsTab">{{ t('monitor.service.logs') }}</div>
+      </div>
+      <!-- Detail tab (same structure/styles as the process detail drawer) -->
+      <div v-show="svcDrawerTab === 'detail'" class="svc-detail-pane">
+        <div class="process-detail">
+          <div class="detail-section" @contextmenu="onDetailSectionContextMenu">
+            <div v-for="row in serviceDetailRows" :key="row.label" class="detail-row">
+              <span class="detail-label">{{ row.label }}</span>
+              <span class="detail-value">{{ row.value }}</span>
+            </div>
+            <div v-if="loadingServiceDetail && serviceDetailRows.length === 0" class="detail-row">
+              <span class="detail-label">{{ t('monitor.loading') }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Logs tab (k8s log-viewer style: line rows + muted timestamp column) -->
+      <div v-show="svcDrawerTab === 'logs'" class="svc-logs-pane">
+        <div class="svc-logs-toolbar">
+          <el-select v-model="logLines" size="small" class="svc-log-lines" @change="onLogLinesChange">
+            <el-option v-for="n in [100, 200, 500, 1000, 2000]" :key="n" :label="String(n)" :value="n" />
+          </el-select>
+          <el-checkbox v-model="logAutoScroll" border size="small">{{ t('monitor.service.autoScroll') }}</el-checkbox>
+          <el-checkbox v-model="logTimestamps" border size="small">{{ t('k8s.logTimestamps') }}</el-checkbox>
+          <el-checkbox v-model="logWrap" border size="small">{{ t('k8s.logWrap') }}</el-checkbox>
+          <div class="flex-spacer" />
+          <el-button size="small" :icon="RefreshRight" :loading="loadingServiceLogs" @click="fetchServiceLogs" />
+        </div>
+        <div
+          ref="logViewerRef"
+          class="svc-log-viewer"
+          :class="{ 'logs-nowrap': !logWrap, 'logs-hide-ts': !logTimestamps }"
+          v-loading="loadingServiceLogs"
+          @contextmenu="showContextMenu"
+        >
+          <div v-for="(l, i) in serviceLogLines" :key="i" class="log-line"><span class="log-ts">{{ l.ts }}</span>{{ l.msg }}</div>
+          <div v-if="!loadingServiceLogs && serviceLogLines.length === 0" class="health-hint" style="padding: 8px 0;">{{ t('monitor.service.noLogs') }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Service action menu (shared, mounted once; opens next to the row button) -->
+    <Menu ref="serviceMenuRef" v-model:visible="serviceMenuVisible">
+      <MenuItem @click="onServiceCmd('start')">{{ t('monitor.service.start') }}</MenuItem>
+      <MenuItem @click="onServiceCmd('stop')">{{ t('monitor.service.stop') }}</MenuItem>
+      <MenuItem @click="onServiceCmd('restart')">{{ t('monitor.service.restart') }}</MenuItem>
+      <MenuItem @click="onServiceCmd('enable')">{{ t('monitor.service.enable') }}</MenuItem>
+      <MenuItem @click="onServiceCmd('disable')">{{ t('monitor.service.disable') }}</MenuItem>
+    </Menu>
+
     <Menu ref="ctxMenuRef" v-model:visible="ctxMenuVisible" v-slot="{ current }">
       <MenuItem @click="copyContextText(current)">{{ t('terminal.copy') }}</MenuItem>
     </Menu>
@@ -345,7 +554,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
-import { SetMonitorActiveTab, SetMonitorPaused, GetProcessDetail, KillProcess, GetPorts, GetDisks, GetNetworkCards } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { SetMonitorActiveTab, SetMonitorPaused, GetProcessDetail, KillProcess, GetPorts, GetDisks, GetNetworkCards, GetServices, GetServiceDetail, GetServiceLogs, ServiceAction, GetDevices, GetHardwareFru, GetHardwareLan, GetHardwareSensors } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { msg } from '../services/message'
 import { Close, RefreshRight } from '@element-plus/icons-vue'
 import { ChevronRight } from '@lucide/vue'
@@ -424,6 +633,80 @@ const netCardList = ref<any[]>([])
 const loadingPorts = ref(false)
 const loadingDisks = ref(false)
 const loadingNetCards = ref(false)
+
+// Services / devices / hardware health (on-demand tabs)
+const serviceList = ref<any[]>([])
+const deviceList = ref<any[]>([])
+// Hardware health loads as three independent parts (FRU / IPMI LAN /
+// sensors) so a slow ipmitool call does not block the others.
+const hardwareFru = ref<any>(null)
+const hardwareLan = ref<any[]>([])
+const hardwareSensors = ref<any>(null)
+const loadingServices = ref(false)
+const loadingDevices = ref(false)
+const loadingHardwareFru = ref(false)
+const loadingHardwareLan = ref(false)
+const loadingHardwareSensors = ref(false)
+const serviceSearch = ref('')
+const deviceSearch = ref('')
+const sensorSearch = ref('')
+
+// Service action confirm dialog
+const serviceDialogVisible = ref(false)
+const serviceActionTarget = ref<any>(null)
+const serviceActionCmd = ref('')
+const serviceMenuRef = ref<InstanceType<typeof Menu> | null>(null)
+const serviceMenuVisible = ref(false)
+
+// Service detail drawer: two tabs (properties detail / journal logs)
+const serviceDetailVisible = ref(false)
+const serviceDetailName = ref('')
+const serviceDetail = ref<any>(null)
+const loadingServiceDetail = ref(false)
+const svcDrawerTab = ref<'detail' | 'logs'>('detail')
+const logLines = ref(200)
+const logAutoScroll = ref(true)
+const logTimestamps = ref(true)
+const logWrap = ref(false)
+const serviceLogs = ref('')
+const loadingServiceLogs = ref(false)
+const logViewerRef = ref<HTMLElement | null>(null)
+
+// Drawer width (draggable via the left-edge resizer, same as the k8s drawer;
+// not persisted across sessions).
+const svcDrawerWidth = ref(420)
+let svcResizeStartX = 0
+let svcResizeStartW = 0
+
+function onServiceResizeMove(e: MouseEvent) {
+  const dx = svcResizeStartX - e.clientX
+  svcDrawerWidth.value = Math.max(320, Math.min(window.innerWidth - 120, svcResizeStartW + dx))
+}
+
+function onServiceResizeEnd() {
+  document.removeEventListener('mousemove', onServiceResizeMove)
+  document.removeEventListener('mouseup', onServiceResizeEnd)
+}
+
+function onServiceResizeStart(e: MouseEvent) {
+  svcResizeStartX = e.clientX
+  svcResizeStartW = svcDrawerWidth.value
+  document.addEventListener('mousemove', onServiceResizeMove)
+  document.addEventListener('mouseup', onServiceResizeEnd)
+  e.preventDefault()
+}
+
+// Split a journalctl short-iso line into "<RFC3339 timestamp> <message>",
+// mirroring the k8s log viewer's line model.
+function splitLogLine(line: string): { ts: string; msg: string } {
+  const sp = line.indexOf(' ')
+  if (sp > 0 && /^\d{4}-\d\d-\d\dT/.test(line)) {
+    return { ts: line.slice(0, sp), msg: line.slice(sp + 1) }
+  }
+  return { ts: '', msg: line }
+}
+
+const serviceLogLines = computed(() => serviceLogs.value.split('\n').map(splitLogLine))
 
 const chartCanvas = ref<HTMLCanvasElement>()
 
@@ -602,6 +885,104 @@ const filteredDisks = computed(() => {
   )
 })
 
+const filteredServices = computed(() => {
+  const q = serviceSearch.value.trim().toLowerCase()
+  if (!q) return serviceList.value
+  return serviceList.value.filter((s: any) =>
+    String(s.name).toLowerCase().includes(q) ||
+    String(s.description).toLowerCase().includes(q)
+  )
+})
+
+const filteredDevices = computed(() => {
+  const q = deviceSearch.value.trim().toLowerCase()
+  if (!q) return deviceList.value
+  return deviceList.value.filter((d: any) =>
+    String(d.id).toLowerCase().includes(q) ||
+    String(d.class).toLowerCase().includes(q) ||
+    String(d.vendor).toLowerCase().includes(q) ||
+    String(d.product).toLowerCase().includes(q) ||
+    String(d.driver).toLowerCase().includes(q) ||
+    String(d.serial).toLowerCase().includes(q)
+  )
+})
+
+// Devices grouped by category for the tree table. Search filters the flat
+// list first, so empty categories disappear while searching.
+const deviceCatOrder = ['processor', 'memory', 'storage', 'network', 'display', 'bus', 'other']
+const deviceTreeData = computed(() => {
+  const groups = new Map<string, any[]>()
+  for (const d of filteredDevices.value) {
+    const cat = d.category || 'other'
+    if (!groups.has(cat)) groups.set(cat, [])
+    groups.get(cat)!.push(d)
+  }
+  const rows: any[] = []
+  for (const cat of deviceCatOrder) {
+    const kids = groups.get(cat)
+    if (!kids?.length) continue
+    rows.push({
+      rowKey: `cat:${cat}`,
+      isGroup: true,
+      category: cat,
+      count: kids.length,
+      children: kids.map((d, i) => ({ ...d, rowKey: `${cat}:${i}:${d.id}` }))
+    })
+  }
+  return rows
+})
+
+const filteredSensors = computed(() => {
+  const list = hardwareSensors.value?.sensors || []
+  const q = sensorSearch.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((s: any) =>
+    String(s.name).toLowerCase().includes(q) ||
+    String(s.value).toLowerCase().includes(q) ||
+    String(s.source).toLowerCase().includes(q)
+  )
+})
+
+function serviceStateClass(row: any) {
+  if (row.active === 'active') return 'state-ok'
+  if (row.active === 'failed') return 'state-bad'
+  return 'state-idle'
+}
+
+function sensorStatusClass(status: string) {
+  const s = String(status || '').toLowerCase()
+  if (s === 'ok') return 'state-ok'
+  if (s === 'nc' || s === 'cr' || s === 'nr' || s.includes('alarm')) return 'state-bad'
+  return 'state-idle'
+}
+
+const serviceActionMessage = computed(() => {
+  if (!serviceActionTarget.value) return ''
+  return t('monitor.service.actionConfirm', {
+    action: t('monitor.service.' + serviceActionCmd.value),
+    name: serviceActionTarget.value.name
+  })
+})
+
+const serviceDetailRows = computed(() => {
+  const d = serviceDetail.value
+  if (!d) return []
+  return [
+    { label: t('monitor.service.description'), value: d.Description },
+    { label: t('monitor.service.load'), value: d.LoadState },
+    { label: t('monitor.service.active'), value: d.SubState && d.SubState !== d.ActiveState ? `${d.ActiveState} (${d.SubState})` : d.ActiveState },
+    { label: t('monitor.service.enabled'), value: d.UnitFileState },
+    { label: 'PID', value: d.ExecMainPID && d.ExecMainPID !== '0' ? d.ExecMainPID : '' },
+    { label: t('monitor.memory'), value: memBytes(d.MemoryCurrent) }
+  ].filter(r => r.value)
+})
+
+function memBytes(v: unknown): string {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return formatBytes(n)
+}
+
 const systemGroups = computed(() => {
   if (!systemInfo.value) return []
   return [
@@ -614,8 +995,7 @@ const systemGroups = computed(() => {
         { label: t('monitor.version'), value: systemInfo.value.version || '' },
         { label: t('monitor.kernel'), value: systemInfo.value.kernel || '' },
         { label: t('monitor.hostname'), value: systemInfo.value.hostname || '' },
-        { label: t('monitor.localIP'), value: systemInfo.value.localIP || '' },
-        { label: t('monitor.timezone'), value: systemInfo.value.timezone || '' }
+        { label: t('monitor.localIP'), value: systemInfo.value.localIP || '' }
       ].filter(i => i.value)
     },
     {
@@ -629,8 +1009,62 @@ const systemGroups = computed(() => {
         { label: t('monitor.diskTotal'), value: systemInfo.value.diskTotal || '' }
       ].filter(i => i.value)
     },
+    {
+      title: t('monitor.clock'),
+      items: [
+        { label: t('monitor.timezone'), value: systemInfo.value.timezone || '' },
+        { label: t('monitor.clock'), value: hostClockText.value },
+        { label: t('monitor.skew'), value: clockSkewText.value }
+      ].filter(i => i.value && i.value !== '-')
+    },
     ].filter(g => g.items.length > 0)
 })
+
+// Host clock: systemInfo.epochSec is the host's POSIX time at the moment the
+// system payload arrived (hostClockAt). Extrapolating with the live tick lets
+// the host clock keep ticking between payload refreshes, and the skew to the
+// local clock stays constant. (Same approach as MonitorOverviewSidebar.)
+const hostClockAt = ref(0)
+const clockNow = ref(0)
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+const hostClockText = computed(() => {
+  const base = Number(systemInfo.value?.epochSec)
+  if (!base || !hostClockAt.value) return '-'
+  const liveMs = base * 1000 + (clockNow.value - hostClockAt.value)
+  const tz = systemInfo.value?.timezone
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).format(new Date(liveMs))
+  } catch {
+    return new Date(liveMs).toLocaleString(undefined, { hour12: false })
+  }
+})
+
+const clockSkewText = computed(() => {
+  const base = Number(systemInfo.value?.epochSec)
+  if (!base || !hostClockAt.value) return '-'
+  // Positive = host clock is ahead of the local machine.
+  const s = (base * 1000 - hostClockAt.value) / 1000
+  return formatSkew(s)
+})
+
+function formatSkew(seconds: number): string {
+  const sign = seconds < 0 ? '-' : '+'
+  const abs = Math.abs(seconds)
+  if (abs < 1) return `${sign}${abs.toFixed(1)}s`
+  const d = Math.floor(abs / 86400)
+  const h = Math.floor((abs % 86400) / 3600)
+  const m = Math.floor((abs % 3600) / 60)
+  const s = Math.round(abs % 60)
+  if (d > 0) return `${sign}${d}d ${h}h ${m}m`
+  if (h > 0) return `${sign}${h}h ${m}m`
+  if (m > 0) return `${sign}${m}m ${s}s`
+  return `${sign}${s}s`
+}
 
 const killMessage = computed(() => {
   if (!killTarget.value) return ''
@@ -747,6 +1181,136 @@ async function fetchNetCards() {
     netCardList.value = []
   } finally {
     loadingNetCards.value = false
+  }
+}
+
+async function fetchServices() {
+  loadingServices.value = true
+  try {
+    serviceList.value = await GetServices(props.sessionId)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch services')
+    serviceList.value = []
+  } finally {
+    loadingServices.value = false
+  }
+}
+
+async function fetchDevices() {
+  loadingDevices.value = true
+  try {
+    deviceList.value = await GetDevices(props.sessionId)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch devices')
+    deviceList.value = []
+  } finally {
+    loadingDevices.value = false
+  }
+}
+
+async function fetchHardwareFru() {
+  loadingHardwareFru.value = true
+  try {
+    hardwareFru.value = await GetHardwareFru(props.sessionId)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch FRU info')
+    hardwareFru.value = null
+  } finally {
+    loadingHardwareFru.value = false
+  }
+}
+
+async function fetchHardwareLan() {
+  loadingHardwareLan.value = true
+  try {
+    hardwareLan.value = await GetHardwareLan(props.sessionId)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch IPMI LAN info')
+    hardwareLan.value = []
+  } finally {
+    loadingHardwareLan.value = false
+  }
+}
+
+async function fetchHardwareSensors() {
+  loadingHardwareSensors.value = true
+  try {
+    hardwareSensors.value = await GetHardwareSensors(props.sessionId)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch hardware sensors')
+    hardwareSensors.value = null
+  } finally {
+    loadingHardwareSensors.value = false
+  }
+}
+
+function onServiceActionMenu(row: any, e: MouseEvent) {
+  serviceActionTarget.value = row
+  serviceMenuRef.value?.toggle(e.currentTarget as HTMLElement)
+}
+
+function onServiceCmd(cmd: string) {
+  serviceMenuVisible.value = false
+  serviceActionCmd.value = cmd
+  serviceDialogVisible.value = true
+}
+
+async function confirmServiceAction() {
+  if (!serviceActionTarget.value) return
+  const name = serviceActionTarget.value.name
+  const cmd = serviceActionCmd.value
+  try {
+    await ServiceAction(props.sessionId, name, cmd)
+    msg.success(`${cmd} ${name} OK`)
+    serviceDialogVisible.value = false
+    fetchServices()
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to run service action')
+  }
+}
+
+async function onServiceRowClick(row: any) {
+  serviceDetailName.value = row.name
+  serviceDetail.value = null
+  serviceLogs.value = ''
+  svcDrawerTab.value = 'detail'
+  serviceDetailVisible.value = true
+  loadingServiceDetail.value = true
+  try {
+    serviceDetail.value = await GetServiceDetail(props.sessionId, row.name)
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch service detail')
+  } finally {
+    loadingServiceDetail.value = false
+  }
+}
+
+function onServiceLogsTab() {
+  svcDrawerTab.value = 'logs'
+  // Always re-fetch on tab entry so the view is fresh; journalctl is cheap.
+  fetchServiceLogs()
+}
+
+function onLogLinesChange() {
+  fetchServiceLogs()
+}
+
+async function fetchServiceLogs() {
+  if (!serviceDetailName.value) return
+  loadingServiceLogs.value = true
+  try {
+    serviceLogs.value = await GetServiceLogs(props.sessionId, serviceDetailName.value, logLines.value)
+    if (logAutoScroll.value) {
+      nextTick(() => {
+        const el = logViewerRef.value
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }
+  } catch (e: any) {
+    msg.error(e?.message || 'Failed to fetch service logs')
+    serviceLogs.value = ''
+  } finally {
+    loadingServiceLogs.value = false
   }
 }
 
@@ -879,7 +1443,11 @@ function drawChart() {
 let unlisten: (() => void) | null = null
 
 onMounted(() => {
-  unlisten =Events.On('session:data', (ev) => { const data: any = ev.data; 
+  // Drive the live host clock (1s local tick extrapolating from epochSec).
+  clockNow.value = Date.now()
+  clockTimer = window.setInterval(() => { clockNow.value = Date.now() }, 1000)
+
+  unlisten =Events.On('session:data', (ev) => { const data: any = ev.data;
     if (data?.id !== props.sessionId) return
     try {
       const payload = JSON.parse(data.data)
@@ -945,6 +1513,8 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   if (unlisten) unlisten()
+  if (clockTimer) window.clearInterval(clockTimer)
+  clockTimer = null
   SetMonitorPaused(props.sessionId, true).catch(() => {})
 })
 
@@ -961,6 +1531,23 @@ watch(activeTab, (tab) => {
   }
   if (tab === 'network' && netCardList.value.length === 0 && !loadingNetCards.value) {
     fetchNetCards()
+  }
+  if (tab === 'services' && serviceList.value.length === 0 && !loadingServices.value) {
+    fetchServices()
+  }
+  if (tab === 'devices' && deviceList.value.length === 0 && !loadingDevices.value) {
+    fetchDevices()
+  }
+  if (tab === 'health') {
+    if (hardwareFru.value === null && !loadingHardwareFru.value) {
+      fetchHardwareFru()
+    }
+    if (hardwareLan.value.length === 0 && !loadingHardwareLan.value) {
+      fetchHardwareLan()
+    }
+    if (!hardwareSensors.value && !loadingHardwareSensors.value) {
+      fetchHardwareSensors()
+    }
   }
 })
 </script>
@@ -1475,7 +2062,10 @@ watch(activeTab, (tab) => {
 
 .ports-pane,
 .disks-pane,
-.network-pane {
+.network-pane,
+.services-pane,
+.devices-pane,
+.health-pane {
   flex-direction: column;
   padding: 0;
 }
@@ -1487,5 +2077,215 @@ watch(activeTab, (tab) => {
 
 .od-table :deep(.cell) {
   user-select: text;
+}
+
+/* Services / devices / hardware health */
+.svc-state {
+  font-variant-numeric: tabular-nums;
+}
+.svc-state.state-ok {
+  color: #67c23a;
+}
+.svc-state.state-bad {
+  color: #f56c6c;
+}
+.svc-state.state-idle {
+  color: var(--text-muted);
+}
+
+.health-top {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.health-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 12px;
+}
+
+.health-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.health-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.health-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.health-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.health-search {
+  width: 180px;
+}
+
+.health-card-body {
+  padding: 0 12px 10px;
+  min-height: 24px;
+}
+
+.health-bottom {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.health-bottom-hint {
+  padding: 0 12px 12px;
+}
+
+/* Single-column label/value grid for FRU and IPMI LAN blocks */
+.info-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.health-table {
+  flex: 1;
+}
+
+.health-hint {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Service drawer: detail/logs tabs and the k8s-style log viewer */
+/* Left-edge drag handle to resize the service drawer (same as the k8s one) */
+.svc-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 101;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.svc-resizer:hover {
+  background: var(--accent, #4096ff);
+}
+
+.svc-drawer-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.svc-tab {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 2px solid transparent;
+}
+
+.svc-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.svc-detail-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.svc-detail-pane .process-detail {
+  flex: 1;
+  min-height: 0;
+}
+
+.svc-logs-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.svc-logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  /* wrap instead of squeezing controls (same as the k8s log toolbar) */
+  flex-wrap: wrap;
+}
+
+.svc-logs-toolbar :deep(.el-checkbox) {
+  margin-right: 0;
+}
+
+.flex-spacer {
+  flex: 1;
+}
+
+.svc-log-lines {
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.svc-log-viewer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  background: var(--bg-base);
+  user-select: text;
+}
+
+/* Line model identical to the k8s log viewer */
+.svc-log-viewer .log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* No-wrap mode: keep each journal line on one row, scroll horizontally */
+.svc-log-viewer.logs-nowrap .log-line {
+  white-space: pre;
+  word-break: normal;
+}
+
+.svc-log-viewer .log-ts {
+  color: var(--text-muted);
+  margin-right: 8px;
+}
+
+.svc-log-viewer .log-ts:empty {
+  margin-right: 0;
+}
+
+.svc-log-viewer.logs-hide-ts .log-ts {
+  display: none;
 }
 </style>

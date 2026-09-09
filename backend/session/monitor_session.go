@@ -1779,3 +1779,703 @@ func (s *MonitorSession) Resize(cols, rows int) error {
 func (s *MonitorSession) IsConnected() bool {
 	return s.Status() == StatusConnected
 }
+
+// --- Services / PCI devices / hardware health (systemctl, lspci, ipmitool, lm-sensors) ---
+
+type ServiceInfo struct {
+	Name        string `json:"name"`
+	Load        string `json:"load"`
+	Active      string `json:"active"`
+	Sub         string `json:"sub"`
+	Description string `json:"description"`
+	Enabled     string `json:"enabled"`
+}
+
+// DeviceInfo is one row of the hardware devices tab. lshw is the primary
+// source (PCI + USB + NVMe disks); lspci is the fallback (PCI only). Category
+// is a display grouping key ("processor", "memory", "storage", "network",
+// "display", "bus", "other") localized in the frontend.
+type DeviceInfo struct {
+	Category string `json:"category"`
+	ID       string `json:"id"`
+	Class    string `json:"class"`
+	Vendor   string `json:"vendor"`
+	Product  string `json:"product"`
+	Driver   string `json:"driver"`
+	Serial   string `json:"serial"`
+	Capacity string `json:"capacity"`
+	Rev      string `json:"rev"`
+}
+
+type SensorInfo struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Unit   string `json:"unit"`
+	Status string `json:"status"`
+	Source string `json:"source"`
+}
+
+type FruInfo struct {
+	Product      string `json:"product"`
+	Manufacturer string `json:"manufacturer"`
+	Serial       string `json:"serial"`
+	PartNumber   string `json:"partNumber"`
+}
+
+// HardwareSensors is the readings half: IPMI sensor list.
+type HardwareSensors struct {
+	Sensors []SensorInfo `json:"sensors"`
+	HasIpmi bool         `json:"hasIpmi"`
+}
+
+// unitLineRe splits one `systemctl list-units --no-legend` row into
+// UNIT LOAD ACTIVE SUB and a DESCRIPTION that may contain spaces or be empty.
+var unitLineRe = regexp.MustCompile(`^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*(.*)$`)
+
+// parseSystemctlUnits parses `systemctl list-units --type=service --all
+// --no-legend --no-pager` output.
+func parseSystemctlUnits(out string) []ServiceInfo {
+	var services []ServiceInfo
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m := unitLineRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		services = append(services, ServiceInfo{
+			Name:        m[1],
+			Load:        m[2],
+			Active:      m[3],
+			Sub:         m[4],
+			Description: m[5],
+		})
+	}
+	return services
+}
+
+// parseSystemctlUnitFiles parses `systemctl list-unit-files --no-legend`
+// output into a unit -> state map. The trailing VENDOR-PRESET column present
+// on newer systemd is ignored.
+func parseSystemctlUnitFiles(out string) map[string]string {
+	states := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		states[fields[0]] = fields[1]
+	}
+	return states
+}
+
+// parseLspciMm parses `lspci -mm` output:
+// slot "class" "vendor" "device" [-rNN] ["subvendor" "subdevice"]
+func parseLspciMm(out string) []DeviceInfo {
+	var devices []DeviceInfo
+	revRe := regexp.MustCompile(`-r(\S+)`)
+	quotedRe := regexp.MustCompile(`"([^"]*)"`)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		slot := line
+		if i := strings.IndexAny(slot, " \t"); i >= 0 {
+			slot = slot[:i]
+		}
+		q := quotedRe.FindAllStringSubmatch(line, -1)
+		if len(q) < 3 {
+			continue
+		}
+		rev := ""
+		if m := revRe.FindStringSubmatch(line); m != nil {
+			rev = m[1]
+		}
+		devices = append(devices, DeviceInfo{
+			Category: deviceCategory(q[0][1]),
+			ID:       slot,
+			Class:    q[0][1],
+			Vendor:   q[1][1],
+			Product:  q[2][1],
+			Rev:      rev,
+		})
+	}
+	return devices
+}
+
+// parseLspciText parses plain `lspci` output:
+// slot Class: Vendor Device... (rev NN). Used when -mm is unavailable.
+func parseLspciText(out string) []DeviceInfo {
+	var devices []DeviceInfo
+	revRe := regexp.MustCompile(`\(rev ([^)]+)\)`)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		slot := line
+		if i := strings.IndexAny(slot, " \t"); i >= 0 {
+			slot = slot[:i]
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(line, slot))
+		head, tail, found := strings.Cut(rest, ": ")
+		if !found {
+			continue
+		}
+		rev := ""
+		if m := revRe.FindStringSubmatch(tail); m != nil {
+			rev = m[1]
+		}
+		tail = strings.TrimSpace(revRe.ReplaceAllString(tail, ""))
+		vendor, device, _ := strings.Cut(tail, " ")
+		devices = append(devices, DeviceInfo{
+			Category: deviceCategory(strings.TrimSpace(head)),
+			ID:       slot,
+			Class:    strings.TrimSpace(head),
+			Vendor:   vendor,
+			Product:  strings.TrimSpace(device),
+			Rev:      rev,
+		})
+	}
+	return devices
+}
+
+// deviceCategory maps a device class (lshw class or lspci class text) to a
+// display grouping key. Keyword order matters: storage keywords are checked
+// first so "Non-Volatile memory controller" lands in storage, not memory.
+func deviceCategory(cls string) string {
+	c := strings.ToLower(cls)
+	switch {
+	case strings.Contains(c, "disk"), strings.Contains(c, "storage"),
+		strings.Contains(c, "volume"), strings.Contains(c, "tape"),
+		strings.Contains(c, "sata"), strings.Contains(c, "nvme"),
+		strings.Contains(c, "non-volatile"), strings.Contains(c, "sas"),
+		strings.Contains(c, "scsi"), strings.Contains(c, "ide"):
+		return "storage"
+	case strings.Contains(c, "memory"), strings.Contains(c, "dimm"), strings.Contains(c, "ram"):
+		return "memory"
+	case strings.Contains(c, "network"), strings.Contains(c, "ethernet"),
+		strings.Contains(c, "wireless"), strings.Contains(c, "wifi"),
+		strings.Contains(c, "modem"), strings.Contains(c, "fibre"),
+		strings.Contains(c, "communicat"):
+		return "network"
+	case strings.Contains(c, "display"), strings.Contains(c, "vga"),
+		strings.Contains(c, "3d"), strings.Contains(c, "audio"),
+		strings.Contains(c, "multimedia"), strings.Contains(c, "sound"):
+		return "display"
+	case strings.Contains(c, "processor"), strings.Contains(c, "cpu"):
+		return "processor"
+	case strings.Contains(c, "bridge"), strings.Contains(c, "bus"),
+		strings.Contains(c, "usb"):
+		return "bus"
+	default:
+		return "other"
+	}
+}
+
+// parseLshwDevices flattens the full `lshw -json` hardware tree into one
+// device table, in tree order, without filtering by bus type. Every node
+// becomes a row: businfo (or logical name / id) as ID, description as class,
+// plus vendor/product/driver/serial/capacity/revision when present. Capacity
+// is only formatted as bytes for classes whose size is measured in bytes
+// (disk/memory/volume); for other classes lshw "size" has other units (Hz
+// for processors, and so on). Returns nil when the output is not valid JSON
+// so the caller can fall back to lspci.
+func parseLshwDevices(out string) []DeviceInfo {
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" || trimmed[0] != '{' {
+		return nil
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &root); err != nil {
+		return nil
+	}
+	var devices []DeviceInfo
+	var walk func(node map[string]interface{})
+	walk = func(node map[string]interface{}) {
+		dev := DeviceInfo{}
+		cls, _ := node["class"].(string)
+		dev.Category = deviceCategory(cls)
+		if cls == "disk" || cls == "volume" {
+			// Disks read better by device name: nvme0n1, /dev/sda.
+			if ln := lshwFirstLogical(node); ln != "" {
+				dev.ID = ln
+			} else if bi, ok := node["businfo"].(string); ok {
+				dev.ID = bi
+			}
+		} else if bi, ok := node["businfo"].(string); ok && bi != "" {
+			dev.ID = bi
+		} else if ln := lshwFirstLogical(node); ln != "" {
+			dev.ID = ln
+		} else if id, ok := node["id"].(string); ok {
+			dev.ID = id
+		}
+		if desc, ok := node["description"].(string); ok && desc != "" {
+			dev.Class = desc
+		} else if c, ok := node["class"].(string); ok {
+			dev.Class = c
+		}
+		if v, ok := node["vendor"].(string); ok {
+			dev.Vendor = v
+		}
+		if p, ok := node["product"].(string); ok {
+			dev.Product = p
+		}
+		if s, ok := node["serial"].(string); ok {
+			dev.Serial = s
+		}
+		if ver, ok := node["version"].(string); ok {
+			dev.Rev = ver
+		}
+		if cfg, ok := node["configuration"].(map[string]interface{}); ok {
+			if drv, ok := cfg["driver"].(string); ok {
+				dev.Driver = drv
+			}
+		}
+		if size, ok := node["size"].(float64); ok && size > 0 {
+			switch node["class"] {
+			case "disk", "memory", "volume":
+				dev.Capacity = formatBytes(uint64(size))
+			}
+		}
+		devices = append(devices, dev)
+		if children, ok := node["children"].([]interface{}); ok {
+			for _, c := range children {
+				if cm, ok := c.(map[string]interface{}); ok {
+					walk(cm)
+				}
+			}
+		}
+	}
+	walk(root)
+	return devices
+}
+
+// lshwFirstLogical returns the first logical name of a node (lshw emits
+// "logicalname" as a string or an array of strings).
+func lshwFirstLogical(node map[string]interface{}) string {
+	switch ln := node["logicalname"].(type) {
+	case string:
+		return ln
+	case []interface{}:
+		if len(ln) > 0 {
+			if s, ok := ln[0].(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// parseIpmitoolSensors parses `ipmitool sensor list` output. Each line is
+// pipe-separated: Name | Value | Units | Status | States | thresholds...
+func parseIpmitoolSensors(out string) []SensorInfo {
+	var sensors []SensorInfo
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" || !strings.Contains(line, "|") {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) < 4 {
+			continue
+		}
+		sensors = append(sensors, SensorInfo{
+			Name:   strings.TrimSpace(parts[0]),
+			Value:  strings.TrimSpace(parts[1]),
+			Unit:   strings.TrimSpace(parts[2]),
+			Status: strings.TrimSpace(parts[3]),
+			Source: "ipmi",
+		})
+	}
+	return sensors
+}
+
+// parseIpmiFru parses `ipmitool fru print` output key/value pairs, picking
+// the product identity fields (falling back to the board fields). Returns
+// nil when nothing matches.
+func parseIpmiFru(out string) *FruInfo {
+	var pProd, pMan, pSer, pPart, bProd, bMan, bSer, bPart string
+	for _, line := range strings.Split(out, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		switch key {
+		case "Product Name":
+			pProd = value
+		case "Product Manufacturer":
+			pMan = value
+		case "Product Serial":
+			pSer = value
+		case "Product Part Number":
+			pPart = value
+		case "Board Product":
+			bProd = value
+		case "Board Manufacturer":
+			bMan = value
+		case "Board Serial":
+			bSer = value
+		case "Board Part Number":
+			bPart = value
+		}
+	}
+	fru := &FruInfo{
+		Product:      pProd,
+		Manufacturer: pMan,
+		Serial:       pSer,
+		PartNumber:   pPart,
+	}
+	if fru.Product == "" {
+		fru.Product = bProd
+	}
+	if fru.Manufacturer == "" {
+		fru.Manufacturer = bMan
+	}
+	if fru.Serial == "" {
+		fru.Serial = bSer
+	}
+	if fru.PartNumber == "" {
+		fru.PartNumber = bPart
+	}
+	if fru.Product == "" && fru.Manufacturer == "" && fru.Serial == "" && fru.PartNumber == "" {
+		return nil
+	}
+	return fru
+}
+
+// LanField is one ordered key/value row of `ipmitool lan print` output.
+type LanField struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// parseIpmiLan parses `ipmitool lan print <channel>` output. Every line is
+// "Key : Value"; continuation lines (empty key, as in the Auth Type block)
+// and empty values are skipped. Field order is preserved for display.
+func parseIpmiLan(out string) []LanField {
+	var fields []LanField
+	for _, line := range strings.Split(out, "\n") {
+		key, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		fields = append(fields, LanField{Key: key, Value: value})
+	}
+	return fields
+}
+
+// standardLanKeys are the network fields shown on the hardware info card,
+// in display order; everything else in `lan print` output is dropped.
+var standardLanKeys = []string{
+	"IP Address",
+	"Subnet Mask",
+	"MAC Address",
+	"Default Gateway IP",
+}
+
+// standardLanFields filters parsed lan output down to the standard keys and
+// reorders them for display. Missing keys are simply absent.
+func standardLanFields(fields []LanField) []LanField {
+	byKey := make(map[string]string, len(fields))
+	for _, f := range fields {
+		if _, seen := byKey[f.Key]; !seen {
+			byKey[f.Key] = f.Value
+		}
+	}
+	var out []LanField
+	for _, key := range standardLanKeys {
+		if v, ok := byKey[key]; ok {
+			out = append(out, LanField{Key: key, Value: v})
+		}
+	}
+	return out
+}
+
+// parseSystemctlShow parses `systemctl show <unit>` key=value lines.
+func parseSystemctlShow(out string) map[string]string {
+	props := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		props[key] = value
+	}
+	return props
+}
+
+var serviceActionWhitelist = map[string]bool{
+	"start": true, "stop": true, "restart": true, "enable": true, "disable": true,
+}
+
+func validServiceAction(action string) bool {
+	return serviceActionWhitelist[action]
+}
+
+// validUnitName rejects anything but the characters a systemd unit name may
+// contain, so a hostile name cannot escape the shell command.
+var unitNameRe = regexp.MustCompile(`^[A-Za-z0-9@._\-]+$`)
+
+func validUnitName(name string) bool {
+	return unitNameRe.MatchString(name)
+}
+
+// Service log viewer limits: the frontend picks a history size (100..2000)
+// and the backend clamps it so a hostile/buggy value cannot request the
+// whole journal.
+const (
+	defaultLogLines = 200
+	maxLogLines     = 2000
+)
+
+// clampLogLines normalizes the requested history size for journalctl -n.
+func clampLogLines(n int) int {
+	if n <= 0 {
+		return defaultLogLines
+	}
+	if n > maxLogLines {
+		return maxLogLines
+	}
+	return n
+}
+
+// GetServiceLogs tails the last N lines of a unit's journal. journalctl is
+// tried as the connected user first, then with `sudo -n` (same NOPASSWD
+// convention as ServiceAction) because unprivileged users often cannot read
+// system units' logs. Missing journalctl or both permission paths failing
+// yields an empty string rather than an error.
+func (s *MonitorSession) GetServiceLogs(name string, lines int) (string, error) {
+	if !validUnitName(name) {
+		return "", fmt.Errorf("invalid unit name: %s", name)
+	}
+	n := clampLogLines(lines)
+	session, err := s.client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+
+	script := fmt.Sprintf(`exec 2>/dev/null
+if command -v journalctl >/dev/null 2>&1; then
+    out=$(journalctl -u %s -n %d --no-pager --no-host -o short-iso) || \
+    out=$(sudo -n journalctl -u %s -n %d --no-pager --no-host -o short-iso) || true
+    echo "$out"
+fi
+exit 0`, name, n, name, n)
+	out, err := session.Output(script)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// GetServices lists systemd services with their unit-file enablement state.
+// Both systemctl calls run in one SSH round-trip; `|| true` keeps the script
+// exit status clean when systemctl is missing entirely (non-systemd hosts),
+// which surfaces as an empty list.
+func (s *MonitorSession) GetServices() ([]ServiceInfo, error) {
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	script := `exec 2>/dev/null
+systemctl list-units --type=service --all --no-legend --no-pager || true
+echo "__SPLIT__"
+systemctl list-unit-files --type=service --no-legend || true`
+	out, err := session.Output(script)
+	if err != nil {
+		return nil, err
+	}
+
+	parts := strings.Split(string(out), "__SPLIT__")
+	services := parseSystemctlUnits(safeIndex(parts, 0))
+	states := parseSystemctlUnitFiles(safeIndex(parts, 1))
+	for i := range services {
+		if state, ok := states[services[i].Name]; ok {
+			services[i].Enabled = state
+		}
+	}
+	return services, nil
+}
+
+// GetServiceDetail returns the raw `systemctl show <unit>` properties.
+func (s *MonitorSession) GetServiceDetail(name string) (map[string]string, error) {
+	if !validUnitName(name) {
+		return nil, fmt.Errorf("invalid unit name: %s", name)
+	}
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	out, err := session.Output(fmt.Sprintf("systemctl show %s --no-pager 2>/dev/null || true", name))
+	if err != nil {
+		return nil, err
+	}
+	return parseSystemctlShow(string(out)), nil
+}
+
+// ServiceAction runs `sudo -n systemctl <action> <name>` on the remote host.
+// The unit name and action are strictly validated; the combined output is
+// returned as the error message so permission problems (sudo without a
+// NOPASSWD rule, missing root) reach the frontend instead of being swallowed.
+func (s *MonitorSession) ServiceAction(name, action string) error {
+	if !validUnitName(name) {
+		return fmt.Errorf("invalid unit name: %s", name)
+	}
+	if !validServiceAction(action) {
+		return fmt.Errorf("invalid action: %s", action)
+	}
+	session, err := s.client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+
+	out, err := session.CombinedOutput(fmt.Sprintf("sudo -n systemctl %s %s", action, name))
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s %s: %s", action, name, msg)
+	}
+	return nil
+}
+
+// GetDevices lists the full hardware device table. `lshw -json` is the
+// primary source (one flattened row per tree node: PCI, USB, disks, memory,
+// CPU, ...); `lspci` is the fallback (PCI only) for hosts without lshw. Both
+// run in one SSH round-trip, separated by a __SPLIT__ marker.
+func (s *MonitorSession) GetDevices() ([]DeviceInfo, error) {
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	script := `exec 2>/dev/null
+if command -v lshw >/dev/null 2>&1; then
+    lshw -json 2>/dev/null
+    echo "__SPLIT__"
+fi
+if command -v lspci >/dev/null 2>&1; then
+    lspci -mm || lspci
+fi
+exit 0`
+	out, err := session.Output(script)
+	if err != nil {
+		return nil, err
+	}
+
+	parts := strings.SplitN(string(out), "__SPLIT__", 2)
+	lshwOut := ""
+	lspciOut := ""
+	if len(parts) == 2 {
+		// lshw ran; lspci output (if any) is in the second part.
+		lshwOut = parts[0]
+		lspciOut = parts[1]
+	} else {
+		// lshw missing: the whole output is lspci.
+		lspciOut = parts[0]
+	}
+	if devices := parseLshwDevices(lshwOut); len(devices) > 0 {
+		return devices, nil
+	}
+	if devices := parseLspciMm(lspciOut); len(devices) > 0 {
+		return devices, nil
+	}
+	return parseLspciText(lspciOut), nil
+}
+
+// GetHardwareFru collects the IPMI FRU product identity. A missing ipmitool
+// leaves a nil result instead of failing the call. Scripts end with an
+// explicit `exit 0` so "tool not found" degrades to empty data rather than
+// an error (the trailing `command -v && echo` would otherwise exit 1).
+func (s *MonitorSession) GetHardwareFru() (*FruInfo, error) {
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	script := `exec 2>/dev/null
+if command -v ipmitool >/dev/null 2>&1; then
+    ipmitool fru print || true
+fi
+exit 0`
+	out, err := session.Output(script)
+	if err != nil {
+		return nil, err
+	}
+	return parseIpmiFru(string(out)), nil
+}
+
+// GetHardwareLan collects the standard BMC network fields from
+// `ipmitool lan print` (IP address, MAC, gateway, ...). Non-standard fields
+// are filtered out; a missing ipmitool leaves an empty result.
+func (s *MonitorSession) GetHardwareLan() ([]LanField, error) {
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	script := `exec 2>/dev/null
+if command -v ipmitool >/dev/null 2>&1; then
+    ipmitool lan print 1 || ipmitool lan print || true
+fi
+exit 0`
+	out, err := session.Output(script)
+	if err != nil {
+		return nil, err
+	}
+	return standardLanFields(parseIpmiLan(string(out))), nil
+}
+
+// GetHardwareSensors collects IPMI sensor readings via `ipmitool sensor
+// list`. A missing ipmitool leaves an empty result (hasIpmi false) instead of
+// failing the call.
+func (s *MonitorSession) GetHardwareSensors() (*HardwareSensors, error) {
+	session, err := s.client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	script := `exec 2>/dev/null
+if command -v ipmitool >/dev/null 2>&1; then
+    echo "===HAS==="
+    ipmitool sensor list || true
+fi
+exit 0`
+	out, err := session.Output(script)
+	if err != nil {
+		return nil, err
+	}
+
+	text := string(out)
+	res := &HardwareSensors{
+		HasIpmi: strings.Contains(text, "===HAS==="),
+	}
+	if res.HasIpmi {
+		res.Sensors = parseIpmitoolSensors(text[strings.Index(text, "===HAS===")+len("===HAS==="):])
+	}
+	return res, nil
+}
