@@ -34,6 +34,7 @@
           @click.stop
           @contextmenu.stop
         />
+        <span v-if="panelShortcut" class="panel-shortcut">{{ panelShortcut }}</span>
       </div>
       <div class="panel-header-actions">
         <button
@@ -170,6 +171,7 @@ const props = defineProps<{
   showHeader: boolean
   isActive: boolean
   workspaceId?: string
+  shortcutIndex?: number
 }>()
 
 const emit = defineEmits<{
@@ -188,6 +190,13 @@ const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const isWindows = /Windows|Win32/i.test(navigator.userAgent)
+const panelShortcut = computed(() => {
+  if (!props.shortcutIndex || props.shortcutIndex > 9) return ''
+  if (isMac) return `⌥${props.shortcutIndex}`
+  if (isWindows) return `Alt+${props.shortcutIndex}`
+  return ''
+})
 
 // Human-readable keybinding for a shortcut action ('' when unset), shown as a
 // hint in the panel "..." menu. Reactive via settingsStore, so the hint updates
@@ -620,6 +629,13 @@ watch(() => props.panel.outputLog, (val) => {
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: text;
+}
+.panel-shortcut {
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
 }
 .panel-icon-wrapper {
   position: relative;

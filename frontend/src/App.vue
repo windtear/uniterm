@@ -743,13 +743,38 @@ function onWheel(e: WheelEvent) {
   }
 }
 
-// macOS-only system shortcuts (issue #339): Cmd+Q quits, Cmd+W closes the
-// active tab. Guarded by isMac so Windows/Linux never see this behaviour —
-// there Ctrl+Q/W stay free for the terminal and the existing keybindings.
+// Platform shortcuts: macOS uses Cmd/Option and Windows uses Ctrl/Alt. Linux
+// keeps these combinations available to terminals and configurable bindings.
 let isMac = false
-function onMacSystemShortcut(e: KeyboardEvent) {
-  if (!isMac || e.defaultPrevented) return
-  if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+let isWindows = false
+function onPlatformSystemShortcut(e: KeyboardEvent) {
+  if ((!isMac && !isWindows) || e.defaultPrevented) return
+  const digitMatch = e.code.match(/^Digit([1-9])$/)
+  const workspaceModifier = e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
+  if (workspaceModifier && digitMatch) {
+    const tab = tabStore.activeTab
+    if (!tab || tab.type !== 'workspace') return
+    const panelId = tab.panelIds[Number(digitMatch[1]) - 1]
+    if (!panelId) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    tabStore.setActivePanel(tab.id, panelId)
+    nextTick(() => focusPanelTerminal(panelId))
+    return
+  }
+  const tabModifier = !e.altKey && !e.shiftKey && (
+    (isMac && e.metaKey && !e.ctrlKey) ||
+    (isWindows && e.ctrlKey && !e.metaKey)
+  )
+  if (tabModifier && digitMatch) {
+    const tab = tabStore.tabs[Number(digitMatch[1]) - 1]
+    if (!tab) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    tabStore.setActiveTab(tab.id)
+    return
+  }
+  if (!isMac || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
   const key = e.key.toLowerCase()
   if (key === 'q') {
     e.preventDefault()
@@ -787,8 +812,15 @@ onMounted(async () => {
   // scrolls, but bails on defaultPrevented — so we must preempt it.
   document.addEventListener('wheel', onWheel, { passive: false, capture: true })
   // macOS system shortcuts (Cmd+Q / Cmd+W) — only armed on darwin.
-  try { isMac = (await GetPlatform()) === 'darwin' } catch { isMac = false }
-  if (isMac) document.addEventListener('keydown', onMacSystemShortcut, true)
+  try {
+    const platform = await GetPlatform()
+    isMac = platform === 'darwin'
+    isWindows = platform === 'windows'
+  } catch {
+    isMac = false
+    isWindows = false
+  }
+  if (isMac || isWindows) document.addEventListener('keydown', onPlatformSystemShortcut, true)
   // Keyboard shortcuts — load once on mount, watch for settings changes
   applyKeybindings()
   installGlobalListener()
@@ -1012,7 +1044,7 @@ onUnmounted(() => {
   updateCheck.dispose()
   window.removeEventListener('input:contextmenu', onInputContextMenu)
   document.removeEventListener('wheel', onWheel, { capture: true })
-  document.removeEventListener('keydown', onMacSystemShortcut, true)
+  document.removeEventListener('keydown', onPlatformSystemShortcut, true)
   // RDP overlay tracking
   window.removeEventListener('rdp:overlay-push', RDPHideForOverlay)
   window.removeEventListener('rdp:overlay-pop', RDPShowForOverlay)

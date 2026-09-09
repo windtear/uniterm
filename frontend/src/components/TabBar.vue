@@ -16,6 +16,7 @@
 
         <TabItem
           :tab="tab"
+          :shortcut-index="index + 1"
           :is-active="tab.id === activeTabId"
           @activate="setActiveTab"
           @close="closeTab"

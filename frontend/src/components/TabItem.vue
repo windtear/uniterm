@@ -44,6 +44,7 @@
       @blur="confirmEdit"
       @click.stop
     />
+    <span v-if="tabShortcut" class="tab-shortcut">{{ tabShortcut }}</span>
     <Radio
       v-if="showBroadcastIcon"
       class="tab-broadcast-icon"
@@ -137,6 +138,7 @@ import { SquareTerminal, Laptop, LaptopMinimal, FolderUp, FolderOpen, Folders, F
 
 const props = defineProps<{
   tab: TerminalTab | SettingsTab | SFTPTab | RDPTab | VNCTab | SPICETab | DBTab | MonitorTab | WorkspaceTab
+  shortcutIndex?: number
   isActive: boolean
   hasNotification?: boolean
   showClose?: boolean
@@ -159,6 +161,13 @@ const { duplicateSession } = useDuplicateSession()
 const { t } = useI18n()
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const isWindows = /Windows|Win32/i.test(navigator.userAgent)
+const tabShortcut = computed(() => {
+  if (!props.shortcutIndex || props.shortcutIndex > 9) return ''
+  if (isMac) return `⌘${props.shortcutIndex}`
+  if (isWindows) return `Ctrl+${props.shortcutIndex}`
+  return ''
+})
 
 // Human-readable keybinding for a shortcut action ('' when unset), shown as a
 // hint in the tab right-click context menu. Reactive via settingsStore, so the
@@ -664,6 +673,13 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tab-shortcut {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
 }
 .tab-disconnected {
   opacity: 0.5;
