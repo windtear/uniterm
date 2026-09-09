@@ -6,6 +6,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -111,9 +112,11 @@ func (s *LocalSession) updateMouseTrackingState(data []byte) {
 		}
 	}
 }
+
 type LocalSession struct {
 	baseSession
 	cpty                 *conpty.ConPty
+	admin                *adminPty // elevated shell relayed from the broker process
 	stdin                io.WriteCloser
 	stdout               io.Reader
 	cmd                  *exec.Cmd
@@ -153,6 +156,16 @@ func (s *LocalSession) Connect(config ConnectionConfig) error {
 	if shell == "" {
 		shell = defaultShell()
 	}
+	displayPath := shell
+
+	// admin:// shells spawn elevated. When uniTerm itself already runs as
+	// administrator the prefix is dropped and the shell starts like any
+	// other; otherwise an elevated broker process relays the ConPTY.
+	elevate := false
+	if inner, ok := ParseAdminShellPath(shell); ok {
+		shell = inner
+		elevate = !IsProcessElevated()
+	}
 
 	// Determine working directory: use config.Cwd if set, otherwise user home.
 	workDir := config.Cwd
@@ -162,7 +175,7 @@ func (s *LocalSession) Connect(config ConnectionConfig) error {
 		}
 	}
 
-	s.title = shellName(shell)
+	s.title = shellName(displayPath)
 
 	var commandLine string
 	var cmd *exec.Cmd
@@ -196,6 +209,35 @@ func (s *LocalSession) Connect(config ConnectionConfig) error {
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Dir = workDir
+
+	// Elevated shell: the ConPTY lives in the elevated broker process and is
+	// relayed to us over the control pipe, so everything below (direct
+	// conpty.Start / pipe fallback) only applies to unelevated shells.
+	if elevate {
+		cols, rows := s.GetPendingSize()
+		if cols <= 0 || rows <= 0 {
+			cols, rows = 80, 24
+		}
+		tp, err := startElevatedPty(localPtySpawn{
+			CommandLine: commandLine,
+			WorkDir:     workDir,
+			Cols:        cols,
+			Rows:        rows,
+		})
+		if errors.Is(err, errElevationCancelled) {
+			s.setStatus(StatusError)
+			return fmt.Errorf("administrator terminal: %w", err)
+		}
+		if err != nil {
+			s.setStatus(StatusError)
+			return fmt.Errorf("administrator terminal: %w", err)
+		}
+		s.admin = tp
+		s.setStatus(StatusConnected)
+		go s.readLoop()
+		go s.runPostLoginScript(config.PostLoginScript)
+		return nil
+	}
 
 	// Try ConPTY first for a real pseudo-terminal experience.
 	if conpty.IsConPtyAvailable() {
@@ -293,6 +335,9 @@ func buildCommandLine(shell string) string {
 }
 
 func shellName(path string) string {
+	if inner, ok := ParseAdminShellPath(path); ok {
+		return shellName(inner) + " (Admin)"
+	}
 	if distro, ok := parseWSLPath(path); ok {
 		return "WSL - " + distro
 	}
@@ -382,7 +427,9 @@ func (s *LocalSession) readLoop() {
 		var n int
 		var err error
 		usingConPty := s.cpty != nil
-		if usingConPty {
+		if s.admin != nil {
+			n, err = s.admin.Read(buf)
+		} else if usingConPty {
 			n, err = s.cpty.Read(buf)
 		} else {
 			n, err = s.stdout.Read(buf)
@@ -424,7 +471,9 @@ func (s *LocalSession) readLoop() {
 func (s *LocalSession) Write(data []byte) error {
 	encoded := s.encodeInput(data)
 	var err error
-	if s.cpty != nil {
+	if s.admin != nil {
+		_, err = s.admin.Write(encoded)
+	} else if s.cpty != nil {
 		_, err = s.cpty.Write(encoded)
 	} else if s.stdin != nil {
 		_, err = s.stdin.Write(encoded)
@@ -452,6 +501,11 @@ func (s *LocalSession) Write(data []byte) error {
 func (s *LocalSession) Disconnect() error {
 	s.disconnectOnce.Do(func() {
 		close(s.quit)
+		if s.admin != nil {
+			// Closing the control pipe makes the elevated broker kill the
+			// shell and exit.
+			s.admin.Close()
+		}
 		if s.cpty != nil {
 			// Close but leave the field set: readLoop, Write and Resize read
 			// s.cpty without holding a lock, and nilling it here raced them.
@@ -471,6 +525,9 @@ func (s *LocalSession) Disconnect() error {
 
 func (s *LocalSession) Resize(cols, rows int) error {
 	s.SetPendingSize(cols, rows)
+	if s.admin != nil {
+		return s.admin.Resize(cols, rows)
+	}
 	if s.cpty != nil {
 		return s.cpty.Resize(cols, rows)
 	}

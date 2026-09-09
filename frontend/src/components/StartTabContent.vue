@@ -604,6 +604,10 @@ function onFilterSelect(val: string) {
 function getShellLabel(path: string): string {
   if (!path) return 'Local'
   const lower = path.toLowerCase()
+  if (lower.startsWith('admin://')) {
+    const inner = getShellLabel(path.slice(8))
+    return inner.endsWith(' (Admin)') ? inner : `${inner} (Admin)`
+  }
   if (lower.startsWith('wsl://')) {
     const distro = path.slice(6)
     return distro ? `WSL - ${distro}` : 'WSL'

@@ -16,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/ys-ll/uniterm/backend/log"
+	"github.com/ys-ll/uniterm/backend/session"
 	"github.com/ys-ll/uniterm/backend/store"
 )
 
@@ -30,6 +31,14 @@ var devBuild = Version == "dev"
 var assets embed.FS
 
 func main() {
+	// Administrator-shell broker mode: an elevated copy of uniTerm launched
+	// via the "runas" verb relays ConPTY I/O for admin local terminals (see
+	// backend/session/local_admin_windows.go). Must run before anything else
+	// so the broker never creates a window, webview or app store.
+	if session.RunLocalPtyBroker(os.Args) {
+		return
+	}
+
 	// Capture top-level panics
 	defer func() {
 		if r := recover(); r != nil {
