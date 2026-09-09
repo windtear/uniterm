@@ -741,6 +741,70 @@ func (a *App) GetNetworkCards(sessionID string) ([]session.NetCardInfo, error) {
 	return ms.GetNetworkCards()
 }
 
+func (a *App) GetServices(sessionID string) ([]session.ServiceInfo, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetServices()
+}
+
+func (a *App) GetServiceDetail(sessionID string, name string) (map[string]string, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetServiceDetail(name)
+}
+
+func (a *App) GetServiceLogs(sessionID string, name string, lines int) (string, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	return ms.GetServiceLogs(name, lines)
+}
+
+func (a *App) ServiceAction(sessionID string, name string, action string) error {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return err
+	}
+	return ms.ServiceAction(name, action)
+}
+
+func (a *App) GetDevices(sessionID string) ([]session.DeviceInfo, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetDevices()
+}
+
+func (a *App) GetHardwareFru(sessionID string) (*session.FruInfo, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetHardwareFru()
+}
+
+func (a *App) GetHardwareLan(sessionID string) ([]session.LanField, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetHardwareLan()
+}
+
+func (a *App) GetHardwareSensors(sessionID string) (*session.HardwareSensors, error) {
+	ms, err := a.getMonitorSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ms.GetHardwareSensors()
+}
+
 func (a *App) SaveTerminalHistory(entries []store.HistoryEntry) error {
 	if a.terminalHistoryStore == nil {
 		return fmt.Errorf("terminal history store not initialized")
