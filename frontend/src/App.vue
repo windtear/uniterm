@@ -1009,6 +1009,7 @@ function applyKeybindings() {
 onUnmounted(() => {
   uninstallGlobalListener()
   uninstallFocusRestore?.()
+  updateCheck.dispose()
   window.removeEventListener('input:contextmenu', onInputContextMenu)
   document.removeEventListener('wheel', onWheel, { capture: true })
   document.removeEventListener('keydown', onMacSystemShortcut, true)

@@ -57,10 +57,11 @@ export const useSettingsStore = defineStore('settings', () => {
       const loadedSettings = await LoadSettings()
       if (loadedSettings) {
         settings.value = mergeSettings(loadedSettings)
-        loaded.value = true
       }
     } catch {
       // use defaults
+    } finally {
+      loaded.value = true
     }
     try {
       availableShells.value = await GetAvailableShells()

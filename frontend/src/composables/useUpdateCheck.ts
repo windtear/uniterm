@@ -35,15 +35,23 @@ const checking = ref(false)
 const autoCheck = ref(true)
 
 let timer: ReturnType<typeof setInterval> | null = null
+let initialCheckTimer: ReturnType<typeof setTimeout> | null = null
+let settingsWatchStop: (() => void) | null = null
 
 function startTimer() {
-  stopTimer()
+  if (timer !== null) {
+    clearInterval(timer)
+  }
   timer = setInterval(() => {
     checkForUpdate()
   }, 24 * 60 * 60 * 1000)
 }
 
 function stopTimer() {
+  if (initialCheckTimer !== null) {
+    clearTimeout(initialCheckTimer)
+    initialCheckTimer = null
+  }
   if (timer !== null) {
     clearInterval(timer)
     timer = null
@@ -79,37 +87,52 @@ async function checkForUpdate(showStatus = false): Promise<UpdateInfo | null> {
   }
 }
 
-// Sync autoCheck with settings store and manage timer
+// Persist changes made through the UI. Store-driven updates already contain
+// the same value and must not be written back.
 watch(autoCheck, (enabled) => {
-  try {
-    const settings = useSettingsStore()
-    settings.settings.autoCheckUpdate = enabled
-    settings.save()
-  } catch { /* store may not be ready yet */ }
-  if (enabled) {
-    startTimer()
-  } else {
-    stopTimer()
-  }
+  const settings = useSettingsStore()
+  if (settings.settings.autoCheckUpdate === enabled) return
+  settings.settings.autoCheckUpdate = enabled
+  settings.save()
 })
 
 function initAutoCheck() {
   checking.value = false
+  stopTimer()
+  settingsWatchStop?.()
+  settingsWatchStop = null
+
   // Fetch current version immediately so About page shows it
   GetAppInfo().then(info => {
     if (!updateInfo.value) {
       updateInfo.value = { hasUpdate: false, current: info.version, latest: '', releaseUrl: '' }
     }
   }).catch(() => {})
-  try {
-    const settings = useSettingsStore()
-    const v = settings.settings.autoCheckUpdate
-    autoCheck.value = (v == null) ? true : v
-  } catch { /* use default */ }
-  if (autoCheck.value) {
-    setTimeout(() => checkForUpdate(), 5000)
-    startTimer()
-  }
+  // Wait for persisted settings before scheduling network requests. Reading
+  // the temporary default here would ignore a stored `false`.
+  const settings = useSettingsStore()
+  let initialized = false
+  settingsWatchStop = watch(
+    [() => settings.loaded, () => settings.settings.autoCheckUpdate],
+    ([loaded, persisted]) => {
+      if (!loaded) return
+      const enabled = persisted ?? true
+      autoCheck.value = enabled
+      if (enabled) {
+        if (!initialized) {
+          initialCheckTimer = setTimeout(() => {
+            initialCheckTimer = null
+            checkForUpdate()
+          }, 5000)
+        }
+        startTimer()
+      } else {
+        stopTimer()
+      }
+      initialized = true
+    },
+    { immediate: true },
+  )
 }
 
 const state = reactive({
@@ -118,13 +141,13 @@ const state = reactive({
   autoCheck,
   checkForUpdate,
   initAutoCheck,
+  dispose,
 })
 
-// dispose stops the periodic update-check timer. Call from app teardown
-// or a top-level component's onBeforeUnmount so the interval does not
-// outlive the Vue app instance (FE-04).
 function dispose() {
   stopTimer()
+  settingsWatchStop?.()
+  settingsWatchStop = null
 }
 
 if (typeof window !== 'undefined') {
