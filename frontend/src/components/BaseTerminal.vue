@@ -2069,9 +2069,11 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(20, 23, 29, 0.88);
+  /* 跟应用主题走（与 Zmodem 面板、终端建议弹窗等悬浮控件一致）；
+     保留 88% 不透明度，让 blur 透出一点终端内容。 */
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 4px 6px;
   z-index: 50;
@@ -2111,7 +2113,7 @@ defineExpose({
   transition: all 0.15s;
 }
 .search-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 .terminal-area :deep(.xterm) {
