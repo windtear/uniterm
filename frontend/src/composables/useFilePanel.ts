@@ -3,7 +3,7 @@ import { useI18n } from '../i18n'
 import { msg } from '../services/message'
 import {
   SftpCopy, SftpMove, SftpRename, SftpRemove, SftpMakeDir, SftpPutContent,
-  SftpPut, SftpGet, SftpChmod,
+  SftpPut, SftpGet, SftpChmod, SftpSymlink,
   SftpLocalCopy, SftpLocalMove, SftpLocalRename, SftpLocalRemove, SftpLocalMkdir, SftpLocalPutContent,
   SftpCancelTransfer, SftpPauseTransfer, SftpResumeTransfer,
   OpenMultipleFilesDialog, OpenDirectoryDialog,
@@ -118,22 +118,30 @@ export function useFileDialogs() {
     title: string
     inputValue: string
     placeholder: string
+    // Optional second input row (e.g. the target path of "new link"); the
+    // second el-input is rendered only when input2Placeholder is non-empty.
+    inputValue2: string
+    input2Placeholder: string
     message: string
-    resolve: ((r: { ok: boolean; value?: string }) => void) | null
-  }>({ visible: false, type: 'input', title: '', inputValue: '', placeholder: '', message: '', resolve: null })
+    resolve: ((r: { ok: boolean; value?: string; value2?: string }) => void) | null
+  }>({ visible: false, type: 'input', title: '', inputValue: '', placeholder: '', inputValue2: '', input2Placeholder: '', message: '', resolve: null })
 
   function openGeneric(opts: {
     type?: 'input' | 'message'
     title: string
     inputValue?: string
     placeholder?: string
+    inputValue2?: string
+    input2Placeholder?: string
     message?: string
-  }): Promise<{ ok: boolean; value?: string }> {
+  }): Promise<{ ok: boolean; value?: string; value2?: string }> {
     return new Promise((resolve) => {
       dlg.type = opts.type || 'input'
       dlg.title = opts.title
       dlg.inputValue = opts.inputValue || ''
       dlg.placeholder = opts.placeholder || ''
+      dlg.inputValue2 = opts.inputValue2 || ''
+      dlg.input2Placeholder = opts.input2Placeholder || ''
       dlg.message = opts.message || ''
       dlg.resolve = resolve
       dlg.visible = true
@@ -142,10 +150,11 @@ export function useFileDialogs() {
 
   function onGenericConfirm() {
     const value = dlg.inputValue
+    const value2 = dlg.inputValue2
     const resolve = dlg.resolve
     dlg.visible = false
     dlg.resolve = null
-    resolve?.({ ok: true, value })
+    resolve?.({ ok: true, value, value2 })
   }
 
   function onGenericCancel() {
@@ -170,6 +179,8 @@ export interface FilePanelOps {
   rename: (sid: string, src: string, dst: string) => Promise<unknown>
   remove: (sid: string, path: string, isDir: boolean) => Promise<unknown>
   makeDir: (sid: string, path: string) => Promise<unknown>
+  /** Remote panels only: create a symbolic link. Local panes never set it. */
+  symlink?: (sid: string, target: string, linkPath: string) => Promise<unknown>
   putContent: (sid: string, path: string, content: string) => Promise<unknown>
   put: (sid: string, localPath: string, targetPath: string, recursive: boolean) => Promise<unknown>
   get: (sid: string, remotePath: string, localPath: string, isDir: boolean) => Promise<unknown>
@@ -182,6 +193,7 @@ export const remoteFileOps: FilePanelOps = {
   rename: SftpRename,
   remove: SftpRemove,
   makeDir: SftpMakeDir,
+  symlink: SftpSymlink,
   putContent: (sid, path, content) => SftpPutContent(sid, path, content, 'utf-8'),
   put: SftpPut,
   get: SftpGet,
@@ -435,6 +447,33 @@ export function useFilePanel(opts: FilePanelOptions) {
     }
   }
 
+  // Creates a symbolic link pointing at the entered target. The target is
+  // stored verbatim, so relative targets resolve against the link's own
+  // directory (per symlink semantics). Panels of protocols without link
+  // semantics hide the menu entry and never get here.
+  async function onSymlink() {
+    const id = sid()
+    if (!id) return
+    const r = await openGeneric({
+      title: t('sftp.dialog.symlinkTitle'),
+      placeholder: t('sftp.dialog.symlinkName'),
+      input2Placeholder: t('sftp.dialog.symlinkTarget'),
+    })
+    if (!r.ok || !r.value) return
+    const name = r.value.trim()
+    const target = (r.value2 || '').trim()
+    if (!name) { msg.warning(t('sftp.dialog.newFileEmpty')); return }
+    if (name.includes('/') || name.includes('\\')) { msg.warning(t('sftp.dialog.newFileInvalid')); return }
+    if (!target) { msg.warning(t('sftp.dialog.symlinkTargetEmpty')); return }
+    try {
+      await ops.symlink?.(id, target, joinPath(cwd.value, name))
+      msg.success(t('sftp.dialog.confirm'))
+      refresh()
+    } catch (e: any) {
+      msg.error(e?.toString() || 'Failed to create link')
+    }
+  }
+
   // --- Upload / download ----------------------------------------------------
 
   async function onUpload() {
@@ -600,7 +639,7 @@ export function useFilePanel(opts: FilePanelOptions) {
     clipboard, cutItemNames, clipboardCount, pasteLoading,
     onCopyToClipboard, onCutToClipboard, onClearClipboard, onCancelPaste, onPaste,
     // file actions
-    onRename, onDelete, onMkdir, onNewFile,
+    onRename, onDelete, onMkdir, onNewFile, onSymlink,
     onUpload, onDownloadTo,
     onEditFile, onEditExternal,
     // transfer panel

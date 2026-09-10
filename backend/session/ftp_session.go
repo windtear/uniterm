@@ -238,6 +238,11 @@ func (s *FTPSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 }
 
 
+// Symlink is not supported: the FTP protocol has no link semantics.
+func (s *FTPSession) Symlink(_, _ string) error {
+	return fmt.Errorf("symlink is not supported by FTP")
+}
+
 func (s *FTPSession) MakeDir(dir string) error {
 	if err := s.requireClient(); err != nil {
 		return err

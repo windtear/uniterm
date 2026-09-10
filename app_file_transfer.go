@@ -37,6 +37,10 @@ type fileTransferSession interface {
 	ChangeLocalDir(dir string) (session.FileListResult, error)
 	ListLocalDrives() ([]session.FileItem, error)
 	MakeDir(dir string) error
+	// Symlink creates a symbolic link on the remote side. Only backends with
+	// link semantics implement it (SFTP/SCP/WSL); others return an error and
+	// the frontend hides the UI entry.
+	Symlink(target, linkPath string) error
 	Remove(path string, recursive bool) error
 	Rename(oldPath, newPath string) error
 	Chmod(path string, mode os.FileMode) error
@@ -118,6 +122,16 @@ func (a *App) SftpMakeDir(sessionID, dir string) error {
 		return err
 	}
 	return fs.MakeDir(dir)
+}
+
+// SftpSymlink creates a symbolic link on the remote side. Only supported by
+// SFTP/SCP/WSL backends; other protocols return a "not supported" error.
+func (a *App) SftpSymlink(sessionID, target, linkPath string) error {
+	fs, err := a.getSftp(sessionID)
+	if err != nil {
+		return err
+	}
+	return fs.Symlink(target, linkPath)
 }
 
 func (a *App) SftpRemove(sessionID, path string, recursive bool) error {

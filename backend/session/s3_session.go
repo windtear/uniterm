@@ -274,6 +274,11 @@ func (s *S3Session) ChangeRemoteDir(dir string) (FileListResult, error) {
 	return s.ListRemote(target)
 }
 
+// Symlink is not supported: object storage has no links.
+func (s *S3Session) Symlink(_, _ string) error {
+	return fmt.Errorf("symlink is not supported by S3")
+}
+
 func (s *S3Session) MakeDir(dir string) error {
 	if err := s.requireClient(); err != nil {
 		return err

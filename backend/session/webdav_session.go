@@ -155,6 +155,11 @@ func (s *WebDAVSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 	return FileListResult{Files: files, Dir: target}, nil
 }
 
+// Symlink is not supported: WebDAV has no link resource type.
+func (s *WebDAVSession) Symlink(_, _ string) error {
+	return fmt.Errorf("symlink is not supported by WebDAV")
+}
+
 func (s *WebDAVSession) MakeDir(dir string) error {
 	if err := s.requireClient(); err != nil {
 		return err

@@ -317,6 +317,12 @@ func (s *SMBSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 	return s.ListRemote(target)
 }
 
+// Symlink is not supported: the SMB client library does not expose reparse
+// point creation.
+func (s *SMBSession) Symlink(_, _ string) error {
+	return fmt.Errorf("symlink is not supported by SMB")
+}
+
 func (s *SMBSession) MakeDir(dir string) error {
 	if err := s.requireShare(); err != nil {
 		return err
