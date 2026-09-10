@@ -37,6 +37,58 @@ settingsStore.init()
 
 app.mount('#app')
 
+// Global IME guard: swallow keydown/keyup events consumed by an IME
+// composition (e.g. Enter confirming a candidate word) before any
+// element-level handler mistakes them for app shortcuts. xterm terminals are
+// exempt — they manage their own IME pipeline.
+//
+// keydown: isComposing is the standard signal; keyCode 229 is the phantom code
+// WKWebView reports for composition keystrokes where isComposing is unreliable.
+//
+// keyup: the commit key's keyup arrives AFTER compositionend, so isComposing
+// is already false there. Track state via composition events instead: while
+// composing, keyups are blocked; on compositionend exactly one keyup (the
+// commit key's) is blocked. A real (non-IME) keydown disarms the pending
+// swallow, so a mouse-click commit (no keyup) cannot swallow the user's next
+// keystroke.
+{
+  const inTerminal = (t: EventTarget | null) =>
+    !!(t as Element | null)?.closest?.('.xterm')
+  let inComposition = false
+  let swallowNextKeyup = false
+
+  document.addEventListener('keydown', (e) => {
+    if (inTerminal(e.target)) return
+    // keyCode is deprecated, but 229 is kept deliberately: WKWebView (macOS)
+    // reports composition keystrokes as the phantom keyCode 229, and `key`
+    // ("Process") is not reliably set there.
+    if (e.isComposing || e.key === 'Process' || e.keyCode === 229) {
+      e.stopPropagation()
+      return
+    }
+    // A real keystroke invalidates a pending swallow.
+    swallowNextKeyup = false
+  }, true)
+
+  document.addEventListener('compositionstart', () => {
+    inComposition = true
+    swallowNextKeyup = false
+  }, true)
+
+  document.addEventListener('compositionend', () => {
+    inComposition = false
+    swallowNextKeyup = true
+  }, true)
+
+  document.addEventListener('keyup', (e) => {
+    if (inTerminal(e.target)) return
+    if (inComposition || swallowNextKeyup) {
+      swallowNextKeyup = false
+      e.stopPropagation()
+    }
+  }, true)
+}
+
 // Global context menu closer: broadcast to all menu components via window event
 document.addEventListener('contextmenu', () => {
   window.dispatchEvent(new CustomEvent('global:close-context-menus'))
