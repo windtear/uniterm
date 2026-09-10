@@ -60,6 +60,9 @@ func (a *App) CreateSession(sessionType string, config session.ConnectionConfig)
 		log.Writef("[CreateSession] manager.Create failed: %v", err)
 		return nil, err
 	}
+	if setter, ok := s.(interface{ SetLogIdentity(string, string) }); ok {
+		setter.SetLogIdentity(config.Name, config.Host)
+	}
 	log.Writef("[CreateSession] session created, id=%s", s.ID())
 	// Record the LogOnConnect preference synchronously so the frontend's
 	// subsequent RegisterSessionForPanel can consult it — the actual
@@ -983,7 +986,7 @@ func (a *App) installWriter(sessionID string, logger *session.OutputLogger) {
 // panelLogTitle picks the filename base for a panel's log. Uses the
 // current session's Title if available, otherwise a short synthetic
 // name derived from panelID.
-func (a *App) panelLogTitle(panelID string) (name, protocol string) {
+func (a *App) panelLogTitle(panelID string) (name, host, protocol string) {
 	a.panelLogMu.Lock()
 	var sessionID string
 	for sid, pid := range a.sessionToPanel {
@@ -995,14 +998,22 @@ func (a *App) panelLogTitle(panelID string) (name, protocol string) {
 	a.panelLogMu.Unlock()
 	if sessionID != "" && a.sessionManager != nil {
 		if s, ok := a.sessionManager.Get(sessionID); ok {
-			return s.Title(), s.Type()
+			name, host = s.Title(), ""
+			if identity, ok := s.(interface{ LogIdentity() (string, string) }); ok {
+				configuredName, configuredHost := identity.LogIdentity()
+				if configuredName != "" {
+					name = configuredName
+				}
+				host = configuredHost
+			}
+			return name, host, s.Type()
 		}
 	}
 	suffix := panelID
 	if len(suffix) > 8 {
 		suffix = suffix[:8]
 	}
-	return "panel_" + suffix, "session"
+	return "panel_" + suffix, "", "session"
 }
 
 // EnableSessionOutputLog starts writing terminal output for the given
@@ -1021,11 +1032,14 @@ func (a *App) EnableSessionOutputLog(panelID, dir string) (string, error) {
 	// configured override; if that is also empty, OutputLogger.Enable
 	// will pick the OS default.
 	if dir == "" {
-		a.customLogDirMu.RLock()
+		a.sessionLogSettingsMu.RLock()
 		dir = a.customLogDir
-		a.customLogDirMu.RUnlock()
+		a.sessionLogSettingsMu.RUnlock()
 	}
-	name, protocol := a.panelLogTitle(panelID)
+	name, host, protocol := a.panelLogTitle(panelID)
+	a.sessionLogSettingsMu.RLock()
+	filenameTemplate := a.sessionLogFilename
+	a.sessionLogSettingsMu.RUnlock()
 
 	a.panelLogMu.Lock()
 	logger := a.panelLogs[panelID]
@@ -1045,7 +1059,7 @@ func (a *App) EnableSessionOutputLog(panelID, dir string) (string, error) {
 	}
 	a.panelLogMu.Unlock()
 
-	path, err := logger.Enable(dir, name, protocol)
+	path, err := logger.Enable(dir, filenameTemplate, name, host, protocol)
 	if err != nil {
 		return "", err
 	}
@@ -1102,9 +1116,17 @@ func (a *App) GetSessionOutputLogInfo(panelID string) SessionLogInfo {
 // restores the OS default. Existing log files are not migrated; the
 // change only affects logs enabled after this call.
 func (a *App) SetDefaultSessionLogDir(dir string) {
-	a.customLogDirMu.Lock()
+	a.sessionLogSettingsMu.Lock()
 	a.customLogDir = dir
-	a.customLogDirMu.Unlock()
+	a.sessionLogSettingsMu.Unlock()
+}
+
+// setSessionLogFilename installs the template used for newly created logs.
+// Empty selects session.DefaultSessionLogFilenameTemplate.
+func (a *App) setSessionLogFilename(filenameTemplate string) {
+	a.sessionLogSettingsMu.Lock()
+	a.sessionLogFilename = filenameTemplate
+	a.sessionLogSettingsMu.Unlock()
 }
 
 // GetDefaultSessionLogDir returns the directory a fresh session log
@@ -1112,9 +1134,9 @@ func (a *App) SetDefaultSessionLogDir(dir string) {
 // (~/Documents/uniTerm/logs on all platforms). Used by the settings UI
 // to show the current default path as a placeholder.
 func (a *App) GetDefaultSessionLogDir() string {
-	a.customLogDirMu.RLock()
+	a.sessionLogSettingsMu.RLock()
 	custom := a.customLogDir
-	a.customLogDirMu.RUnlock()
+	a.sessionLogSettingsMu.RUnlock()
 	if custom != "" {
 		return custom
 	}

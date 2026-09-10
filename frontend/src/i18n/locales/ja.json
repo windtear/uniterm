@@ -460,6 +460,8 @@
   "settings.cursorBlinkDesc": "端末カーソルを点滅させるかどうか",
   "settings.sessionLogDir": "ログ保存先",
   "settings.sessionLogDirDesc": "セッションログの保存場所。空欄でデフォルトを使用: {path}",
+  "settings.sessionLogFilename": "ログファイル名の形式",
+  "settings.sessionLogFilenameDesc": "%S セッション、%H ホスト、%M 月、%D 日、%h 時、%m 分を使用できます。セッション名とホストが同じ場合は一度だけ含めます。",
   "settings.browse": "参照…",
   "settings.maxTurns": "AI自律対話の最大ラウンド数",
   "settings.maxTurnsDesc": "AIリクエストあたりの自律的な対話ラウンドの上限。0は無制限。デフォルト：20。",

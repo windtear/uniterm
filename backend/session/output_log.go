@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -412,13 +413,13 @@ func (p *lineProcessor) Reset() {
 // The zero value is a disabled logger; Enable installs a file, Disable
 // closes it. All methods are safe for concurrent use.
 type OutputLogger struct {
-	mu       sync.Mutex
-	file     *os.File
-	bw       *bufio.Writer
-	path     string
-	stripper ansiStripper
-	lines    lineProcessor
-	flushCh  chan struct{}
+	mu        sync.Mutex
+	file      *os.File
+	bw        *bufio.Writer
+	path      string
+	stripper  ansiStripper
+	lines     lineProcessor
+	flushCh   chan struct{}
 	flushDone chan struct{}
 	// buffered controls whether writes go through bufio + periodic flush.
 	// SetBuffered(false) opts back into the legacy Sync-per-write path,
@@ -441,33 +442,34 @@ const logFlushInterval = 1 * time.Second
 const bannerHeader = "=== uniTerm session log ==="
 
 // Enable opens the log file and writes the header banner. Returns the
-// final path. If dir is empty, defaultSessionLogDir() is used. If name
-// sanitizes to empty, "session" is used as the base.
-// Filename convention: sanitize(name) + "_" + yyyymmdd_hhmmss + ".log";
-// on same-second name collision, "_2"/"_3"/... is appended before .log.
+// final path. If dir is empty, defaultSessionLogDir() is used.
+// filenameTemplate supports %S (session), %H (host), %M (month), %D (day),
+// %h (hour), and %m (minute). An empty template uses the default.
+// On a name collision, "_2"/"_3"/... is appended before the extension.
 // Any previous file is closed first.
-func (l *OutputLogger) Enable(dir, name, protocol string) (string, error) {
+func (l *OutputLogger) Enable(dir, filenameTemplate, name, host, protocol string) (string, error) {
 	if dir == "" {
 		dir = defaultSessionLogDir()
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir log dir %s: %w", dir, err)
 	}
-	base := sanitizeLogName(name)
-	if base == "" {
-		base = "session"
-	}
 	now := time.Now()
-	stamp := now.Format("20060102_150405")
+	filename := formatLogFilename(filenameTemplate, name, host, now)
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if ext == "" {
+		ext = ".log"
+	}
 
 	var file *os.File
 	var final string
 	for suffix := 1; suffix <= 100; suffix++ {
 		var candidate string
 		if suffix == 1 {
-			candidate = filepath.Join(dir, base+"_"+stamp+".log")
+			candidate = filepath.Join(dir, base+ext)
 		} else {
-			candidate = filepath.Join(dir, fmt.Sprintf("%s_%s_%d.log", base, stamp, suffix))
+			candidate = filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, suffix, ext))
 		}
 		f, err := os.OpenFile(candidate, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {

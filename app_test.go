@@ -124,7 +124,7 @@ func TestApp_PanelLogTitle_FallbackAndLookup(t *testing.T) {
 	a := NewApp("")
 
 	// No registration — fallback path.
-	name, protocol := a.panelLogTitle("panel-X")
+	name, _, protocol := a.panelLogTitle("panel-X")
 	if name == "" {
 		t.Errorf("panelLogTitle empty name for unregistered panel")
 	}
@@ -137,7 +137,7 @@ func TestApp_PanelLogTitle_FallbackAndLookup(t *testing.T) {
 	a.RegisterSessionForPanel("sess-y", "panel-X")
 	start := time.Now()
 	for i := 0; i < 1000; i++ {
-		name, protocol = a.panelLogTitle("panel-X")
+		name, _, protocol = a.panelLogTitle("panel-X")
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
 		t.Errorf("1000 panelLogTitle calls took %v, expected < 50ms", elapsed)

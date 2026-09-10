@@ -635,6 +635,21 @@
               </el-input>
             </div>
           </div>
+
+          <div class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.sessionLogFilename') }}</div>
+              <div class="setting-desc">{{ t('settings.sessionLogFilenameDesc') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-input
+                v-model="settingsStore.settings.terminal.sessionLogFilename"
+                placeholder="%S_%H_%M%D_%h%m.log"
+                @change="settingsStore.save()"
+                clearable
+              />
+            </div>
+          </div>
         </div>
       </div>
 

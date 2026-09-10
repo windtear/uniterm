@@ -102,8 +102,9 @@ type App struct {
 	// customLogDir, when non-empty, overrides defaultSessionLogDir()
 	// as the target for new session logs. Set from settings via
 	// SetDefaultSessionLogDir; ongoing logs are not migrated.
-	customLogDir   string
-	customLogDirMu stdsync.RWMutex
+	customLogDir         string
+	sessionLogFilename   string
+	sessionLogSettingsMu stdsync.RWMutex
 
 	// errCh accumulates non-fatal init failures during startup() so the
 	// frontend can surface them (see StartupError / "app:startup-error"
@@ -255,6 +256,7 @@ func (a *App) initStores(dataDir string, upgrade bool) {
 		// respects the user's choice from a prior run.
 		if settings, err := ss.Load(); err == nil {
 			a.SetDefaultSessionLogDir(settings.Terminal.SessionLogDir)
+			a.setSessionLogFilename(settings.Terminal.SessionLogFilename)
 		}
 	}
 
@@ -1367,6 +1369,8 @@ func (a *App) SaveSettings(settings store.AppSettings) error {
 	}
 	err := a.settingsStore.Save(settings)
 	if err == nil {
+		a.SetDefaultSessionLogDir(settings.Terminal.SessionLogDir)
+		a.setSessionLogFilename(settings.Terminal.SessionLogFilename)
 		a.triggerAutoSync()
 	}
 	return err

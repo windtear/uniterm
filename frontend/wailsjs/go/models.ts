@@ -1850,6 +1850,7 @@ export namespace store {
 	    highlightEnabled?: boolean;
 	    cursorBlink?: boolean;
 	    sessionLogDir?: string;
+	    sessionLogFilename?: string;
 	    wordSeparator?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1869,6 +1870,7 @@ export namespace store {
 	        this.highlightEnabled = source["highlightEnabled"];
 	        this.cursorBlink = source["cursorBlink"];
 	        this.sessionLogDir = source["sessionLogDir"];
+	        this.sessionLogFilename = source["sessionLogFilename"];
 	        this.wordSeparator = source["wordSeparator"];
 	    }
 	}

@@ -90,6 +90,8 @@ export interface TerminalSettings {
   // Override for the session output log directory. Empty means the
   // OS default under ~/Documents/uniTerm/logs.
   sessionLogDir: string
+  // Filename template: %S session, %H host, %M month, %D day, %h hour, %m minute.
+  sessionLogFilename: string
   // Characters that act as word boundaries for xterm.js's double-click
   // word selection. Default mirrors the built-in xterm separators
   // extended with the most common shell / path punctuation, so that
@@ -292,6 +294,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     cursorStyle: 'block',
     minimumContrast: 4.5,
     sessionLogDir: '',
+    sessionLogFilename: '%S_%H_%M%D_%h%m.log',
     wordSeparator: '\\ :;~`!@#$%^&*()=+|[]{}\'",<>?',
     showLineNumbers: false,
     showTimestamps: false,

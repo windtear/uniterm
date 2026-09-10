@@ -294,7 +294,9 @@ type baseSession struct {
 	// logOnConnect mirrors ConnectionConfig.LogOnConnect so the App
 	// layer can query it via AutoLogOnConnect() and decide whether to
 	// enable the log the first time this session binds to a panel.
-	logOnConnect bool
+	logOnConnect   bool
+	logSessionName string
+	logHost        string
 	// idleSignal is sent-to (non-blocking) every time RecordReadActivity
 	// runs. waitIdle subscribes to this channel to avoid the busy-loop
 	// that previously woke every 50ms; see F-017. idleSignalOnce makes
@@ -362,6 +364,22 @@ func (s *baseSession) SetLogOnConnect(v bool) { s.logOnConnect = v }
 // AutoLogOnConnect reports whether this session was created from a
 // connection configured to start logging automatically.
 func (s *baseSession) AutoLogOnConnect() bool { return s.logOnConnect }
+
+// SetLogIdentity records the connection fields used by the session-log
+// filename template. It is called before Connect, so auto-logging can use the
+// original configured name and host even while the connection is starting.
+func (s *baseSession) SetLogIdentity(name, host string) {
+	s.mu.Lock()
+	s.logSessionName = name
+	s.logHost = host
+	s.mu.Unlock()
+}
+
+func (s *baseSession) LogIdentity() (name, host string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.logSessionName, s.logHost
+}
 
 func (s *baseSession) SetPendingSize(cols, rows int) {
 	s.mu.Lock()
