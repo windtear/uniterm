@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "输入时显示历史命令和 AI 补全建议",
   "settings.aiTranscription": "AI 转写",
   "settings.aiTranscriptionDesc": "输入时通过 AI 提供命令改写建议（需先配置 API Key）",
+  "settings.imeCompatibility": "输入法兼容模式",
+  "settings.imeCompatibilityDesc": "在 macOS 上将输入法标记为组字状态的按键直接送入终端，修复快速输入时丢字或重复的问题",
   "settings.fetchModels": "拉取模型列表",
   "settings.fetchModelsSuccess": "已拉取 {count} 个模型",
   "settings.fetchModelsFailed": "拉取模型列表失败",

@@ -32,6 +32,13 @@ type LocalState struct {
 	// ExternalEditor command used to open remote files in an external editor
 	// (SFTP "edit externally"). Local-only preference, never synced.
 	ExternalEditor string `json:"externalEditor"`
+	// ImeCompatibility routes single-character IME-committed input through
+	// xterm's direct delivery path on macOS, working around phantom
+	// keyCode-229 keydowns that make fast typing drop characters. Pointer +
+	// omitempty so older local_state.json files (which lack this field)
+	// still load; nil means the frontend default (enabled on macOS, off
+	// elsewhere).
+	ImeCompatibility *bool `json:"imeCompatibility,omitempty"`
 }
 
 type LocalStateStore struct {

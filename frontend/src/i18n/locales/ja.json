@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "入力中に履歴と AI の候補を表示",
   "settings.aiTranscription": "AI 文字起こし",
   "settings.aiTranscriptionDesc": "入力中に AI によるコマンドの書き換え候補を表示（API キーの設定が必要）",
+  "settings.imeCompatibility": "IME互換モード",
+  "settings.imeCompatibilityDesc": "macOSでIMEが変換中と判定したキー入力をターミナルへ直接渡し、高速入力時の文字の欠落や重複を修正します",
   "settings.fetchModels": "モデルを取得",
   "settings.fetchModelsSuccess": "{connCount}件のモデルを取得しました",
   "settings.fetchModelsFailed": "モデルの取得に失敗しました",

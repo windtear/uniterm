@@ -8,6 +8,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useLocalStateStore } from '../stores/localStateStore'
 import type { CustomTerminalTheme } from '../types/settings'
 import { formatFontFamily } from '../utils/formatFontFamily'
+import { installImeCompatibilityPatch } from '../utils/xtermImeCompatibility'
 import {
   bufferRowSource,
   createLineRegistry,
@@ -57,6 +58,8 @@ export interface ManagedTerminal {
   /** Subscription to terminal.onResize — reflows the buffer, so the registry
    * must be re-keyed to the rows lines now start at. */
   resizeDispose: { dispose(): void } | null
+  /** IME compatibility patch installed on this terminal (macOS only). */
+  imeDispose: { dispose(): void } | null
 }
 
 const terminals = new Map<string, ManagedTerminal>()
@@ -166,6 +169,11 @@ export function acquireTerminal(
     // AFTER loadAddon — the unicode property is provided by the addon.
     terminal.unicode.activeVersion = '11'
 
+    // IME compatibility (macOS): deliver single-char input directly when an
+    // IME marks keystrokes with the phantom keyCode 229, instead of relying
+    // on xterm's racy deferred textarea diff that drops/duplicates chars
+    // under fast typing. The patch reads the setting per event, so toggling
+    // it applies to already-created terminals too.
     managed = {
       terminal,
       fitAddon,
@@ -181,6 +189,11 @@ export function acquireTerminal(
       lineOffset: 0,
       trimDispose: null,
       resizeDispose: null,
+      imeDispose: installImeCompatibilityPatch(terminal, () => {
+        const localState = useLocalStateStore()
+        // nil = unset → default enabled (the patch only installs on macOS).
+        return localState.state.imeCompatibility ?? true
+      }),
     }
 
     // Track scrollback trimming so line-numbers / timestamps stay continuous
@@ -239,6 +252,8 @@ export function releaseTerminal(sessionId: string, ref: string): void {
       managed.trimDispose = null
       managed.resizeDispose?.dispose()
       managed.resizeDispose = null
+      managed.imeDispose?.dispose()
+      managed.imeDispose = null
       managed.terminal.dispose()
       terminals.delete(sessionId)
     }, 500)
@@ -255,6 +270,8 @@ export function disposeTerminal(sessionId: string): void {
   managed.trimDispose = null
   managed.resizeDispose?.dispose()
   managed.resizeDispose = null
+  managed.imeDispose?.dispose()
+  managed.imeDispose = null
   managed.terminal.dispose()
   terminals.delete(sessionId)
 }

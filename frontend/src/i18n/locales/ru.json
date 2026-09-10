@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "Показывать историю и подсказки ИИ при вводе",
   "settings.aiTranscription": "Транскрипция ИИ",
   "settings.aiTranscriptionDesc": "Предлагать переписанные команды через ИИ при вводе (требуется API-ключ)",
+  "settings.imeCompatibility": "Режим совместимости IME",
+  "settings.imeCompatibilityDesc": "На macOS передаёт вводимые символы в терминал напрямую, когда метод ввода помечает нажатия клавиш как составные, исправляя потерю или дублирование символов при быстром наборе",
   "settings.fetchModels": "Получить модели",
   "settings.fetchModelsSuccess": "Получено моделей: {connCount}",
   "settings.fetchModelsFailed": "Не удалось получить модели",
