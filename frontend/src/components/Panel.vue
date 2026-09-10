@@ -6,7 +6,13 @@
     draggable="true"
     @dragstart="emit('dragstart', $event)"
   >
-    <div v-if="showHeader" class="panel-header" :class="{ 'ai-locked': isAILocked }" @dblclick.stop>
+    <div
+      v-if="showHeader"
+      class="panel-header"
+      :class="{ 'ai-locked': isAILocked }"
+      @dblclick.stop
+      @contextmenu="onHeaderContextMenu"
+    >
       <div class="panel-header-left">
         <span class="panel-icon-wrapper">
           <component :is="panelIcon" class="panel-type-icon" />
@@ -26,6 +32,7 @@
           @keydown.escape="cancelEdit"
           @blur="confirmEdit"
           @click.stop
+          @contextmenu.stop
         />
       </div>
       <div class="panel-header-actions">
@@ -59,8 +66,19 @@
             <MenuItem :shortcut="menuShortcut('duplicateSession')" @click="emit('duplicate', panel.id); moreMenuVisible = false">
               {{ t('tab.duplicate') }}
             </MenuItem>
+            <MenuItem @click="forceReconnect(); moreMenuVisible = false">{{ t('tab.reconnect') }}</MenuItem>
+            <MenuItem v-if="serverHost" @click="copyHostAddress">{{ t('tab.copyHostAddress') }}</MenuItem>
+            <MenuItem :shortcut="menuShortcut('lockAI')" @click="toggleAiLockFromMenu">
+              {{ isAILocked ? t('terminal.aiLocked') : t('terminal.lockAI') }}
+            </MenuItem>
             <MenuItem @click="renamePanel">{{ t('tab.rename') }}</MenuItem>
             <MenuItem v-if="panel.config?.id" @click="locateConnection">{{ t('tab.locate') }}</MenuItem>
+            <MenuItem
+              v-if="(panel.type === 'ssh' || panel.type === 'local' || panel.type === 'wsl') && workspaceId"
+              @click="toggleBroadcastTarget"
+            >
+              {{ isPanelBroadcastTarget ? t('tab.unbroadcast') : t('tab.broadcast') }}
+            </MenuItem>
 
             <!-- ② 会话文本操作 -->
             <MenuDivider />
@@ -80,6 +98,12 @@
             <MenuItem v-if="panel.type === 'ssh'" @click="connectSftp(); moreMenuVisible = false">{{ t(connectFileMenuKey(panel.config)) }}</MenuItem>
             <MenuItem v-if="panel.type === 'ssh'" @click="uploadFileRz(); moreMenuVisible = false">{{ t('terminal.uploadFileRz') }}</MenuItem>
             <MenuItem v-if="panel.type === 'ssh'" @click="connectMonitor(); moreMenuVisible = false">{{ t('sidebar.connectMonitor') }}</MenuItem>
+
+            <!-- ④ 关闭 -->
+            <MenuDivider />
+            <MenuItem :shortcut="menuShortcut('closePanel')" @click="emit('close', panel.id); moreMenuVisible = false">
+              {{ t('tab.close') }}
+            </MenuItem>
           </Menu>
         </div>
         <button class="panel-close" @click.stop="emit('close', panel.id)"><X :size="14" /></button>
@@ -128,6 +152,7 @@ import { waitForTerminalSize } from '../services/terminalManager'
 import { connectFileMenuKey } from '../utils/fileTransferUtils'
 import type { ConnectionConfig } from '../types/session'
 import type { CredentialResult } from './CredentialPrompt.vue'
+import { Clipboard } from '@wailsio/runtime'
 
 // Escape sequences to disable all xterm mouse tracking modes.
 // When a terminal app (e.g. opencode, vim, tmux) enables mouse tracking
@@ -223,6 +248,48 @@ function toggleMoreMenu(e: MouseEvent) {
   const opening = !moreMenuVisible.value
   moreMenuRef.value?.toggle(e.currentTarget)
   if (opening) refreshOutputLogState()
+}
+
+// Right-click on the panel header opens the SAME menu as the "..." button
+// (one shared Menu instance), so the two entry points can never drift apart.
+function onHeaderContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  moreMenuRef.value?.openAt(e.clientX, e.clientY)
+  refreshOutputLogState()
+}
+
+// Connection host (IP or hostname) — empty for local/wsl/serial panels.
+const serverHost = computed(() => props.panel.config?.host || '')
+
+const isPanelBroadcastTarget = computed(() =>
+  tabStore.isPanelBroadcasting(props.panel.id)
+)
+
+function toggleAiLockFromMenu() {
+  emit('toggleAiLock', props.panel.id)
+  moreMenuVisible.value = false
+}
+
+// Equivalent to Ctrl+click on the header broadcast button: toggle THIS panel
+// (not the whole workspace) as a broadcast target.
+function toggleBroadcastTarget() {
+  tabStore.toggleBroadcastPanel(props.panel.id)
+  moreMenuVisible.value = false
+}
+
+async function copyHostAddress() {
+  moreMenuVisible.value = false
+  const host = serverHost.value
+  if (!host) return
+  // Wails clipboard, falling back to the browser API when the runtime is
+  // absent (plain dev in a browser) or the call fails.
+  let ok = false
+  try { ok = await Clipboard.SetText(host) } catch { ok = false }
+  if (!ok) {
+    try { await navigator.clipboard.writeText(host) } catch { /* no clipboard */ }
+  }
+  msg.success(t('tab.hostCopied', { host }))
 }
 
 async function refreshOutputLogState() {
