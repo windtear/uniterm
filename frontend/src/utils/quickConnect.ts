@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../types/session'
+import { useIdentityStore } from '../stores/identityStore'
 
 // Platform detection for Windows-only features (e.g., WSLC)
 export const isWindows = /windows/i.test(navigator.userAgent)
@@ -103,7 +104,14 @@ export function formatConnSubtitle(config: ConnectionConfig, getShellLabel?: (pa
     const defaultPort = getDefaultPort(config.type, config.dbType)
     const showPort = defaultPort !== config.port && defaultPort !== undefined
     const portStr = showPort ? `:${config.port}` : ''
-    detail = config.user ? `${config.user}@${config.host}${portStr}` : `${config.host}${portStr}`
+    // Identity connections keep config.user empty by design (the username lives
+    // in the referenced identity and is materialized at connect time), so the
+    // display name is resolved from the identity store here.
+    let user = config.user
+    if (!user && config.authType === 'identity' && config.identityId) {
+      user = useIdentityStore().identities.find((i) => i.id === config.identityId)?.username || ''
+    }
+    detail = user ? `${user}@${config.host}${portStr}` : `${config.host}${portStr}`
   }
   return `${typeLabel} ${detail}`
 }
