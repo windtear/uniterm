@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/ys-ll/uniterm/backend/session"
 	"golang.org/x/sys/windows"
 )
 
@@ -59,6 +60,18 @@ func (a *App) GetAvailableShells() []string {
 	if distros, _ := listWSLDistros(); len(distros) > 0 {
 		for _, d := range distros {
 			shells = append(shells, "wsl://"+d)
+		}
+	}
+	// Administrator variants ride on the detected cmd/powershell paths (UAC
+	// elevation via the broker in backend/session/local_admin_windows.go).
+	// Only offered when uniTerm itself is unelevated — as admin they would be
+	// indistinguishable duplicates of the plain entries.
+	if !session.IsProcessElevated() {
+		for _, sh := range shells {
+			base := strings.ToLower(filepath.Base(sh))
+			if base == "cmd.exe" || base == "powershell.exe" {
+				shells = append(shells, session.AdminShellPathPrefix+sh)
+			}
 		}
 	}
 	return shells
