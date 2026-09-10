@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "Новое подключение...",
   "sidebar.filterAll": "Все",
   "workspace.defaultName": "Рабочее пространство",
+  "workspace.maximizePanel": "Развернуть панель",
+  "workspace.restorePanel": "Восстановить панель",
   "conn.editTitle": "Редактировать подключение",
   "conn.newTitle": "Новое подключение",
   "conn.name": "Имя",

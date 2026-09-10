@@ -7,6 +7,7 @@
       :layout="tab.layout"
       :panel-ids="tab.panelIds"
       :active-panel-id="tab.activePanelId"
+      :maximized-panel-id="tab.maximizedPanelId || null"
       :tab-id="tab.id"
       @close-panel="closePanel"
       @toggle-ai-lock="onToggleAiLock"

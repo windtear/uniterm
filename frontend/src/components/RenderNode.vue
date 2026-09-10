@@ -1,5 +1,9 @@
 <template>
-  <div v-if="node.type === 'leaf'" class="leaf-node">
+  <div
+    v-if="node.type === 'leaf'"
+    class="leaf-node"
+    :class="{ 'maximized-hidden': maximizedPanelId && node.panelId !== maximizedPanelId }"
+  >
     <SettingsTab v-if="panel?.type === 'settings'" />
     <div
       v-else-if="panel"
@@ -14,6 +18,7 @@
         :show-header="isMultiPanel"
         :is-active="activePanelId === panel.id"
         :workspace-id="tabId"
+        :shortcut-index="panelIds.indexOf(panel.id) + 1"
         :key="`${panel.id}-${tabId}`"
         @close="handleClosePanel(panel.id)"
         @dragstart="onPanelDragStart($event, panel.id)"
@@ -36,6 +41,7 @@
         :node="child"
         :panel-ids="panelIds"
         :active-panel-id="activePanelId"
+        :maximized-panel-id="maximizedPanelId"
         :tab-id="tabId"
         @close-panel="(id) => $emit('closePanel', id)"
         @toggle-ai-lock="(id) => $emit('toggleAiLock', id)"
@@ -46,7 +52,7 @@
         @resize="(p) => $emit('resize', p)"
       />
       <PanelSplitter
-        v-if="index < node.children.length - 1"
+        v-if="index < node.children.length - 1 && !maximizedPanelId"
         :direction="node.direction"
         @resize="(delta) => $emit('resize', { node, index, delta })"
       />
@@ -67,6 +73,7 @@ const props = defineProps<{
   node: LayoutNode
   panelIds: string[]
   activePanelId: string | null
+  maximizedPanelId: string | null
   tabId: string
 }>()
 
@@ -97,6 +104,14 @@ const isMultiPanel = computed(() => props.panelIds.length > 1)
 
 const splitStyle = computed(() => {
   if (props.node.type !== 'split') return {}
+  if (props.maximizedPanelId) {
+    const tracks = props.node.children.map(child =>
+      hasPanel(child, props.maximizedPanelId!) ? '1fr' : '0px'
+    )
+    return props.node.direction === 'horizontal'
+      ? { display: 'grid', gridTemplateColumns: tracks.join(' '), gridTemplateRows: '1fr' }
+      : { display: 'grid', gridTemplateColumns: '1fr', gridTemplateRows: tracks.join(' ') }
+  }
   const parts: string[] = []
   for (let i = 0; i < props.node.children.length; i++) {
     if (i > 0) parts.push('4px')
@@ -109,6 +124,11 @@ const splitStyle = computed(() => {
     gridTemplateRows: props.node.direction === 'vertical' ? template : '1fr',
   }
 })
+
+function hasPanel(node: LayoutNode, panelId: string): boolean {
+  if (node.type === 'leaf') return node.panelId === panelId
+  return node.children.some(child => hasPanel(child, panelId))
+}
 
 function getNodeKey(node: LayoutNode): string {
   if (node.type === 'leaf') return node.panelId
@@ -206,6 +226,9 @@ function onDrop(e: DragEvent, panelId: string) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+.leaf-node.maximized-hidden {
+  visibility: hidden;
 }
 .panel-wrapper {
   width: 100%;

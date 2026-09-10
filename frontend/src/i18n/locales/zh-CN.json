@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "新建连接...",
   "sidebar.filterAll": "全部",
   "workspace.defaultName": "工作区",
+  "workspace.maximizePanel": "最大化面板",
+  "workspace.restorePanel": "还原面板",
   "conn.editTitle": "编辑连接",
   "conn.newTitle": "新建连接",
   "conn.name": "名称",

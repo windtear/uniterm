@@ -749,6 +749,20 @@ let isMac = false
 let isWindows = false
 function onPlatformSystemShortcut(e: KeyboardEvent) {
   if ((!isMac && !isWindows) || e.defaultPrevented) return
+  const workspaceMaximizeShortcut = e.shiftKey && !e.altKey && (
+    (isMac && e.metaKey && !e.ctrlKey) ||
+    (isWindows && e.ctrlKey && !e.metaKey)
+  )
+  if (workspaceMaximizeShortcut && e.code === 'Enter') {
+    const tab = tabStore.activeTab
+    if (!tab || tab.type !== 'workspace' || !tab.activePanelId) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    const panelId = tab.activePanelId
+    tabStore.toggleWorkspacePanelMaximize(tab.id)
+    nextTick(() => focusPanelTerminal(panelId))
+    return
+  }
   const digitMatch = e.code.match(/^Digit([1-9])$/)
   const workspaceModifier = e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
   if (workspaceModifier && digitMatch) {

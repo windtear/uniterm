@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "新規接続...",
   "sidebar.filterAll": "すべて",
   "workspace.defaultName": "ワークスペース",
+  "workspace.maximizePanel": "パネルを最大化",
+  "workspace.restorePanel": "パネルを元に戻す",
   "conn.editTitle": "接続を編集",
   "conn.newTitle": "新規接続",
   "conn.name": "名前",

@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "Nouvelle connexion...",
   "sidebar.filterAll": "Tout",
   "workspace.defaultName": "Espace de travail",
+  "workspace.maximizePanel": "Agrandir le panneau",
+  "workspace.restorePanel": "Restaurer le panneau",
   "conn.editTitle": "Modifier la connexion",
   "conn.newTitle": "Nouvelle connexion",
   "conn.name": "Nom",

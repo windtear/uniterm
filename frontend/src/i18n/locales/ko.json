@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "새 연결...",
   "sidebar.filterAll": "전체",
   "workspace.defaultName": "워크스페이스",
+  "workspace.maximizePanel": "패널 최대화",
+  "workspace.restorePanel": "패널 복원",
   "conn.editTitle": "연결 편집",
   "conn.newTitle": "새 연결",
   "conn.name": "이름",

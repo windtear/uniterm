@@ -38,6 +38,15 @@
       </div>
       <div class="panel-header-actions">
         <button
+          v-if="workspaceId"
+          class="panel-maximize"
+          @click.stop="toggleMaximize"
+          :title="maximizeTitle"
+        >
+          <Minimize2 v-if="isMaximized" :size="14" />
+          <Maximize2 v-else :size="14" />
+        </button>
+        <button
           v-if="(panel.type === 'ssh' || panel.type === 'local' || panel.type === 'wsl') && workspaceId"
           class="panel-broadcast"
           :class="{ active: panelBroadcastActive }"
@@ -124,7 +133,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted, inject } from 'vue'
-import { Radio, Sparkles, MoreHorizontal, X, SquareTerminal, Laptop, LaptopMinimal, Cable, Terminal, Zap } from '@lucide/vue'
+import { Radio, Sparkles, MoreHorizontal, X, SquareTerminal, Laptop, LaptopMinimal, Cable, Terminal, Zap, Maximize2, Minimize2 } from '@lucide/vue'
 import BaseTerminal from './BaseTerminal.vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
@@ -197,6 +206,22 @@ const panelShortcut = computed(() => {
   if (isWindows) return `Alt+${props.shortcutIndex}`
   return ''
 })
+const workspaceTab = computed(() =>
+  props.workspaceId ? tabStore.tabs.find(tab => tab.id === props.workspaceId && tab.type === 'workspace') : undefined
+)
+const isMaximized = computed(() => workspaceTab.value?.maximizedPanelId === props.panel.id)
+const maximizeShortcut = computed(() => isMac ? '⌘⇧↩' : isWindows ? 'Ctrl+Shift+Enter' : '')
+const maximizeTitle = computed(() => {
+  const label = t(isMaximized.value ? 'workspace.restorePanel' : 'workspace.maximizePanel')
+  return maximizeShortcut.value ? `${label} (${maximizeShortcut.value})` : label
+})
+
+function toggleMaximize() {
+  if (!props.workspaceId) return
+  tabStore.setActivePanel(props.workspaceId, props.panel.id)
+  tabStore.toggleWorkspacePanelMaximize(props.workspaceId)
+  nextTick(() => baseTerminalRef.value?.focus())
+}
 
 // Human-readable keybinding for a shortcut action ('' when unset), shown as a
 // hint in the panel "..." menu. Reactive via settingsStore, so the hint updates
@@ -685,7 +710,8 @@ watch(() => props.panel.outputLog, (val) => {
   gap: 4px;
   flex-shrink: 0;
 }
-.panel-broadcast {
+.panel-broadcast,
+.panel-maximize {
   background: none;
   border: none;
   color: var(--text-muted);
@@ -695,7 +721,8 @@ watch(() => props.panel.outputLog, (val) => {
   border-radius: 3px;
   line-height: 1;
 }
-.panel-broadcast:hover {
+.panel-broadcast:hover,
+.panel-maximize:hover {
   background: var(--bg-hover);
 }
 .panel-broadcast.active {

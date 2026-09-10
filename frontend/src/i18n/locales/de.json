@@ -30,6 +30,8 @@
   "sidebar.newConnectionFromSearch": "Neue Verbindung...",
   "sidebar.filterAll": "Alle",
   "workspace.defaultName": "Arbeitsbereich",
+  "workspace.maximizePanel": "Bereich maximieren",
+  "workspace.restorePanel": "Bereich wiederherstellen",
   "conn.editTitle": "Verbindung bearbeiten",
   "conn.newTitle": "Neue Verbindung",
   "conn.name": "Name",
