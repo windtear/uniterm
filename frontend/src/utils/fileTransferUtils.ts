@@ -13,3 +13,14 @@ export function fileTransferProto(config?: { type?: string; fileTransferProto?: 
 export function connectFileMenuKey(config?: { type?: string; fileTransferProto?: 'sftp' | 'scp' } | null): string {
   return fileTransferProto(config) === 'scp' ? 'sidebar.connectScp' : 'sidebar.connectSftp'
 }
+
+// True when an operation failed because the transport died rather than because
+// the remote side rejected the request. Covers pkg/sftp's "connection lost"
+// (SFTP/SCP), crypto/ssh and net package wording, and the HTTP transport
+// errors surfaced by WebDAV/S3. A matching error means retrying on a fresh
+// connection may succeed — anything else (e.g. "no such directory") would
+// fail again, so callers can skip the reconnect.
+export function isConnectionLostError(err?: string | null): boolean {
+  if (!err) return false
+  return /connection lost|not connected|use of closed network connection|broken pipe|connection reset|connection refused|unexpected eof|\beof\b|already closed|ssh: disconnected/i.test(err)
+}

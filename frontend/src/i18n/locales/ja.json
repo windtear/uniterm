@@ -271,6 +271,7 @@
   "sftp.done": "完了",
   "sftp.error": "エラー",
   "sftp.connectError": "SFTP 接続に失敗しました",
+  "sftp.reconnecting": "接続が切断されました。再接続中…",
   "sftp.dropHere": "ここにファイルをドロップ",
   "sftp.upload": "アップロード",
   "sftp.downloadTo": "ダウンロード先...",
