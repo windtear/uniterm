@@ -106,3 +106,36 @@ func TestSanitizeScpName(t *testing.T) {
 		t.Errorf("sanitize wrong: %q", got)
 	}
 }
+
+// --- symlink creation / navigation commands ----------------------------------
+
+func TestScpSymlinkCommand(t *testing.T) {
+	cases := []struct {
+		target, link, want string
+	}{
+		{"target", "link", "ln -s 'target' 'link'"},
+		{"target dir", "my link", "ln -s 'target dir' 'my link'"},
+		{"/a/b/../c", "/home/u/l", "ln -s '/a/b/../c' '/home/u/l'"},
+		{"it's", "link", "ln -s 'it'\\''s' 'link'"},
+	}
+	for _, c := range cases {
+		if got := scpSymlinkCommand(c.target, c.link); got != c.want {
+			t.Errorf("scpSymlinkCommand(%q, %q) = %q, want %q", c.target, c.link, got, c.want)
+		}
+	}
+}
+
+// ChangeRemoteDir must report the PHYSICAL directory (pwd -P), so entering a
+// directory symlink lands on its real target — matching SFTP's RealPath and
+// the WSL backend's readlink fallback.
+func TestScpChangeDirCommand(t *testing.T) {
+	cases := []struct{ target, want string }{
+		{"/home/u", "cd '/home/u' 2>/dev/null && pwd -P"},
+		{"/my dir", "cd '/my dir' 2>/dev/null && pwd -P"},
+	}
+	for _, c := range cases {
+		if got := scpChangeDirCommand(c.target); got != c.want {
+			t.Errorf("scpChangeDirCommand(%q) = %q, want %q", c.target, got, c.want)
+		}
+	}
+}

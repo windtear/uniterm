@@ -452,6 +452,14 @@ func (s *SCPSession) ListRemote(dir string) (FileListResult, error) {
 	return FileListResult{Files: files, Dir: dir}, nil
 }
 
+// scpChangeDirCommand builds the shell command entering dir and printing its
+// physical path: pwd -P resolves directory symlinks to their real target, so
+// entering a link lands on the target itself — matching SFTP's RealPath and
+// the WSL backend's readlink fallback (a plain pwd would keep the link path).
+func scpChangeDirCommand(target string) string {
+	return "cd " + shellEscape(target) + " 2>/dev/null && pwd -P"
+}
+
 func (s *SCPSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 	if err := s.requireConnected(); err != nil {
 		return FileListResult{}, err
@@ -460,7 +468,7 @@ func (s *SCPSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 	if !path.IsAbs(dir) {
 		target = path.Join(s.getCwd(), dir)
 	}
-	out, err := s.runCommand("cd "+shellEscape(target)+" 2>/dev/null && pwd", 15*time.Second)
+	out, err := s.runCommand(scpChangeDirCommand(target), 15*time.Second)
 	if err != nil || lastNonEmptyLine(out) == "" {
 		return FileListResult{}, fmt.Errorf("no such directory: %s", target)
 	}
@@ -480,6 +488,26 @@ func (s *SCPSession) MakeDir(dir string) error {
 		p = path.Join(s.getCwd(), p)
 	}
 	_, err := s.runCommand("mkdir "+shellEscape(p), 15*time.Second)
+	return err
+}
+
+// scpSymlinkCommand builds the shell command creating a symbolic link.
+func scpSymlinkCommand(target, linkPath string) string {
+	return fmt.Sprintf("ln -s %s %s", shellEscape(target), shellEscape(linkPath))
+}
+
+// Symlink creates a symbolic link on the remote host via `ln -s`. The link
+// path resolves against the session cwd; the target is stored verbatim (a
+// relative target resolves against the link's own directory).
+func (s *SCPSession) Symlink(target, linkPath string) error {
+	if err := s.requireConnected(); err != nil {
+		return err
+	}
+	p := linkPath
+	if !path.IsAbs(p) {
+		p = path.Join(s.getCwd(), p)
+	}
+	_, err := s.runCommand(scpSymlinkCommand(target, p), 15*time.Second)
 	return err
 }
 

@@ -19,6 +19,15 @@
         @update:model-value="(v: string) => emit('update:inputValue', v)"
         @keyup.enter="emit('confirm')"
       />
+      <el-input
+        v-if="input2Placeholder"
+        :model-value="input2Value"
+        :placeholder="input2Placeholder"
+        :disabled="loading"
+        class="generic-dialog-input2"
+        @update:model-value="(v: string) => emit('update:input2Value', v)"
+        @keyup.enter="emit('confirm')"
+      />
       <p v-if="error" class="generic-dialog-error">{{ error }}</p>
     </template>
     <template #footer>
@@ -39,6 +48,9 @@ defineProps<{
   type?: 'input' | 'message'
   inputValue?: string
   placeholder?: string
+  /** Optional second input row, rendered only when set (e.g. link target). */
+  input2Value?: string
+  input2Placeholder?: string
   message?: string
   error?: string
   loading?: boolean
@@ -47,6 +59,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
   (e: 'update:inputValue', v: string): void
+  (e: 'update:input2Value', v: string): void
   (e: 'confirm'): void
   (e: 'cancel'): void
   (e: 'closed'): void
@@ -54,6 +67,9 @@ const emit = defineEmits<{
 </script>
 
 <style scoped>
+.generic-dialog-input2 {
+  margin-top: 8px;
+}
 .generic-dialog-error {
   color: var(--el-color-danger);
   margin-top: 8px;

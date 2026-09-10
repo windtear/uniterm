@@ -72,6 +72,8 @@
           @delete="onDelete"
           @refresh="onRefreshRemote"
           @mkdir="onMkdir"
+          @symlink="onSymlink"
+          :supports-symlink="remoteSupportsSymlink"
           @chmod="(item: FileItem) => onChmod(item, 'remote')"
           @upload="onUpload"
           @download-to="onDownloadTo"
@@ -107,8 +109,11 @@
       :type="genDlg.type"
       :input-value="genDlg.inputValue"
       :placeholder="genDlg.placeholder"
+      :input2-value="genDlg.inputValue2"
+      :input2-placeholder="genDlg.input2Placeholder"
       :message="genDlg.message"
       @update:inputValue="(v: string) => genDlg.inputValue = v"
+      @update:input2Value="(v: string) => genDlg.inputValue2 = v"
       @confirm="onGenericConfirm"
       @cancel="onGenericCancel"
     />
@@ -168,7 +173,7 @@ import {
   resolveRemoteTarget, resolveLocalTarget, joinPath, autoRename,
 } from '../composables/useFilePanel'
 import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/usePanelReconnect'
-import { isConnectionLostError } from '../utils/fileTransferUtils'
+import { isConnectionLostError, supportsRemoteSymlink } from '../utils/fileTransferUtils'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
@@ -194,6 +199,8 @@ const transferEvents = useTransferTaskEvents(
 const { t } = useI18n()
 bindExtEditUploadedToast()
 const panel = computed(() => panelStore.getPanel(props.panelId))
+// "New link" exists only for backends with link semantics (SFTP/SCP/WSL).
+const remoteSupportsSymlink = computed(() => supportsRemoteSymlink(panel.value?.config ?? undefined))
 
 const localDrives = ref<string[]>([])
 const dragOverLocal = ref(false)
@@ -323,7 +330,7 @@ const localPanel = useFilePanel({
 const {
   clipboard, cutItemNames, clipboardCount, pasteLoading: pasteLoadingRemote,
   onCopyToClipboard, onCutToClipboard, onClearClipboard, onCancelPaste, onPaste,
-  onRename, onDelete, onMkdir, onNewFile,
+  onRename, onDelete, onMkdir, onNewFile, onSymlink,
   onUpload, onDownloadTo,
   onEditFile, onEditExternal,
   onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,

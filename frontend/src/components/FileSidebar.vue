@@ -42,6 +42,8 @@
           @rename="onRename"
           @delete="onDelete"
           @mkdir="onMkdir"
+          @symlink="onSymlink"
+          :supports-symlink="true"
           @chmod="onChmod"
           @send-to-other="onDownloadTo"
           @edit="onEditFile"
@@ -90,15 +92,18 @@
       @confirm="onChmodConfirm"
     />
 
-    <!-- Generic dialog (rename / new dir / new file / delete) -->
+    <!-- Generic dialog (rename / new dir / new file / new link / delete) -->
     <FileGenericDialog
       v-model:visible="genDlg.visible"
       :title="genDlg.title"
       :type="genDlg.type"
       :input-value="genDlg.inputValue"
       :placeholder="genDlg.placeholder"
+      :input2-value="genDlg.inputValue2"
+      :input2-placeholder="genDlg.input2Placeholder"
       :message="genDlg.message"
       @update:inputValue="(v: string) => genDlg.inputValue = v"
+      @update:input2Value="(v: string) => genDlg.inputValue2 = v"
       @confirm="onGenericConfirm"
       @cancel="onGenericCancel"
     />
@@ -275,10 +280,12 @@ const editor = useEditorBridge({ saved: () => onRefresh() })
 const { editorVisible, fileEditorRef } = editor
 
 // ── Shared panel logic (clipboard, dialogs, file ops) — mirrors the SFTP tab ──
+// The "new link" entry is always shown: companion panels are SSH (SFTP/SCP) or
+// WSL, both of which can create symbolic links.
 const {
   clipboard, cutItemNames, clipboardCount, pasteLoading,
   onCopyToClipboard, onCutToClipboard, onClearClipboard, onCancelPaste, onPaste,
-  onRename, onDelete, onMkdir, onNewFile,
+  onRename, onDelete, onMkdir, onNewFile, onSymlink,
   onUpload, onDownloadTo,
   onEditFile, onEditExternal,
   onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,

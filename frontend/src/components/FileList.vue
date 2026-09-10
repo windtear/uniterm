@@ -108,6 +108,7 @@
           <MenuItem @click="doEditExternal">{{ t('sftp.editExternal') }}</MenuItem>
           <MenuItem @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
           <MenuItem @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
+          <MenuItem v-if="supportsSymlink" @click="doSymlink">{{ t('sftp.newLink') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doCopyToClipboard">{{ t('sftp.copy') }}</MenuItem>
           <MenuItem @click="doCutToClipboard">{{ t('sftp.cut') }}</MenuItem>
@@ -123,6 +124,7 @@
         <template v-else-if="menuType === 'dir'">
           <MenuItem @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
           <MenuItem @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
+          <MenuItem v-if="supportsSymlink" @click="doSymlink">{{ t('sftp.newLink') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doCopyToClipboard">{{ t('sftp.copy') }}</MenuItem>
           <MenuItem @click="doCutToClipboard">{{ t('sftp.cut') }}</MenuItem>
@@ -151,6 +153,7 @@
         <template v-else-if="menuType === 'empty'">
           <MenuItem @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
           <MenuItem @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
+          <MenuItem v-if="supportsSymlink" @click="doSymlink">{{ t('sftp.newLink') }}</MenuItem>
           <MenuDivider />
           <MenuItem :class="{ disabled: !clipboardCount }" @click="clipboardCount && doPaste()">{{ t('sftp.paste') }}</MenuItem>
         </template>
@@ -159,6 +162,7 @@
     <Menu ref="moreMenuRef" v-model:visible="moreMenuVisible">
       <MenuItem @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
       <MenuItem @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
+      <MenuItem v-if="supportsSymlink" @click="doSymlink">{{ t('sftp.newLink') }}</MenuItem>
       <MenuDivider />
       <MenuItem class="iconic" :class="{ active: showHidden }" @click="toggleShowHidden">
         <el-icon><Eye :size="14" /></el-icon>
@@ -198,6 +202,8 @@ const props = defineProps<{
   clipboardMode?: 'copy' | 'cut'
   /** Hide the "send to other pane" entry — for hosts with a single pane. */
   showSendToOther?: boolean
+  /** Show the "new link" (symbolic link) entry — only for backends with link semantics. */
+  supportsSymlink?: boolean
   breadcrumbMode?: 'local' | 'remote'
   breadcrumbPath?: string
   breadcrumbSavedPaths?: string[]
@@ -212,6 +218,7 @@ const emit = defineEmits<{
   delete: [items: FileItem[]]
   refresh: []
   mkdir: []
+  symlink: []
   chmod: [item: FileItem]
   upload: []
   downloadTo: [items: FileItem[]]
@@ -543,6 +550,7 @@ function doEdit() { emit('edit', selectedItems.value[0]); ctxMenuVisible.value =
 function doEditExternal() { emit('editExternal', selectedItems.value[0]); ctxMenuVisible.value = false }
 function doNewFile() { emit('newFile'); ctxMenuVisible.value = false; moreMenuVisible.value = false }
 function doMkdir() { emit('mkdir'); ctxMenuVisible.value = false; moreMenuVisible.value = false }
+function doSymlink() { emit('symlink'); ctxMenuVisible.value = false; moreMenuVisible.value = false }
 function toggleShowHidden() { showHidden.value = !showHidden.value }
 function doCopyToClipboard() { emit('copyToClipboard', [...selectedItems.value]); ctxMenuVisible.value = false }
 function doCutToClipboard() { emit('cutToClipboard', [...selectedItems.value]); ctxMenuVisible.value = false }

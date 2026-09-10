@@ -499,6 +499,19 @@ func (s *SFTPSession) MakeDir(dir string) error {
 	return s.sftpClient.Mkdir(p)
 }
 
+// Symlink creates a symbolic link on the remote server (SFTP SSH_FXP_SYMLINK).
+// The link path resolves against the session cwd; the target is stored
+// verbatim (a relative target resolves against the link's own directory).
+func (s *SFTPSession) Symlink(target, linkPath string) error {
+	if err := s.requireClient(); err != nil {
+		return err
+	}
+	if !path.IsAbs(linkPath) {
+		linkPath = path.Join(s.cwd, linkPath)
+	}
+	return s.sftpClient.Symlink(target, linkPath)
+}
+
 func (s *SFTPSession) Remove(p string, recursive bool) error {
 	// Deletes always go through the shell `rm -rf` fast path (much faster for
 	// large trees), falling back to SFTP recursive removal when no shell is
