@@ -939,9 +939,9 @@ func (a *App) StartTunnel(id string) (session.TunnelState, error) {
 		return session.TunnelState{}, err
 	}
 	st := a.tunnelService.StartTunnel(*t, resolve)
-	if st.Status == session.TunnelError {
-		return st, fmt.Errorf("%s", st.Error)
-	}
+	// A failed start is reported through the state (Status=Error + Error text);
+	// returning a Go error here too would turn the Wails call into a rejected
+	// promise and the frontend would lose the state it needs for the toast.
 	return st, nil
 }
 
@@ -951,6 +951,23 @@ func (a *App) StopTunnel(id string) error {
 		a.tunnelService.StopTunnel(id)
 	}
 	return nil
+}
+
+// TestTunnel validates an unsaved tunnel configuration: it brings the tunnel
+// up under a throwaway ID through the same path as StartTunnel (SSH chain
+// dial/auth, then listener bind — for remote mode that also proves the port is
+// free on the server) and tears it down immediately. Status=Running means
+// everything bound; Error carries the reason.
+func (a *App) TestTunnel(t session.Tunnel) (session.TunnelState, error) {
+	if a.tunnelService == nil || a.connectionStore == nil {
+		return session.TunnelState{}, fmt.Errorf("tunnel service not initialized")
+	}
+	resolve, err := a.connResolver()
+	if err != nil {
+		return session.TunnelState{}, err
+	}
+	st := a.tunnelService.TestTunnel(t, resolve)
+	return st, nil
 }
 
 // ListTunnelStates returns the runtime state of every known tunnel.
@@ -977,7 +994,11 @@ func (a *App) autoStartTunnels() {
 	}
 	for _, t := range data.Tunnels {
 		if t.AutoStart {
-			a.tunnelService.StartTunnel(t, resolve)
+			if st := a.tunnelService.StartTunnel(t, resolve); st.Status == session.TunnelError {
+				// The failure also reaches the frontend via the tunnel:state
+				// event; the log keeps a trace for diagnostics.
+				log.Writef("auto-start tunnel %s (%s): %s", t.Name, t.ID, st.Error)
+			}
 		}
 	}
 }

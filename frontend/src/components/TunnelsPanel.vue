@@ -52,7 +52,12 @@
           {{ statusOf(selectedTunnel) === 'running' ? t('tunnels.stop') : t('tunnels.start') }}
         </MenuItem>
         <MenuDivider />
-        <MenuItem @click="editTunnel(selectedTunnel.id)">{{ t('tunnels.editTunnel') }}</MenuItem>
+        <!-- Editing a running tunnel would desync the form from what's actually
+             running; edits require a stop first. -->
+        <MenuItem
+          :class="{ disabled: selectedRunning }"
+          @click="editTunnel(selectedTunnel.id)"
+        >{{ t('tunnels.editTunnel') }}</MenuItem>
         <MenuItem class="danger" @click="doDeleteTunnel(selectedTunnel)">{{ t('tunnels.deleteTunnel') }}</MenuItem>
       </template>
     </Menu>
@@ -67,7 +72,6 @@ import { Plus, Play, Square } from '@lucide/vue'
 import { useTunnelStore, type Tunnel } from '../stores/tunnelStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useI18n } from '../i18n'
-import { msg } from '../services/message'
 import TunnelEditDialog from './TunnelEditDialog.vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
@@ -103,6 +107,7 @@ function matchesSearch(tn: Tunnel): boolean {
 }
 
 const statusOf = (tn: Tunnel) => store.statusOf(tn.id)
+const selectedRunning = computed(() => !!selectedTunnel.value && statusOf(selectedTunnel.value) === 'running')
 const effPort = (tn: Tunnel) => store.states[tn.id]?.localPort || tn.listenPort
 const statusTitle = (tn: Tunnel) => {
   const status = statusOf(tn)
@@ -111,11 +116,12 @@ const statusTitle = (tn: Tunnel) => {
 }
 
 async function toggleRun(tn: Tunnel) {
+  // Errors toast from the tunnel:state listener in the tunnel store, which
+  // also covers auto-start failures and mid-run disconnects.
   if (statusOf(tn) === 'running') {
     await store.stop(tn.id)
   } else {
-    const st = await store.start(tn.id)
-    if (st.status === 'error') msg.error(st.error || t('tunnels.startFailed'))
+    await store.start(tn.id)
   }
 }
 
@@ -126,6 +132,8 @@ function onTunnelContextMenu(e: MouseEvent, tn: Tunnel) {
 
 function editTunnel(id: string) {
   rowMenuVisible.value = false
+  // Disabled rows still fire click handlers (attr fallthrough); guard here.
+  if (store.statusOf(id) === 'running') return
   editingTunnelId.value = id
   editDialogVisible.value = true
 }

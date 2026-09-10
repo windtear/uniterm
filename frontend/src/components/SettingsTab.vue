@@ -800,7 +800,13 @@
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="160">
             <template #default="{ row }">
-              <el-button size="small" @click="openTunnelDialog(row)">{{ t('common.edit') }}</el-button>
+              <!-- Editing a running tunnel would desync the form from what's
+                   actually running; edits require a stop first. -->
+              <el-button
+                size="small"
+                :disabled="tunnelStore.statusOf(row.id) === 'running'"
+                @click="openTunnelDialog(row)"
+              >{{ t('common.edit') }}</el-button>
               <el-button size="small" type="danger" @click="removeTunnel(row)">{{ t('common.delete') }}</el-button>
             </template>
           </el-table-column>

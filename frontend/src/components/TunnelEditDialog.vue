@@ -91,11 +91,24 @@
         <el-switch v-model="form.autoStart" />
         <span class="inline-hint">{{ t('tunnels.autoStart') }}</span>
       </el-form-item>
+
+      <!-- Equivalent ssh command, as a form row: mirrors the values above so
+           users can verify what the fields map to -->
+      <el-form-item :label="t('tunnels.sshExample')">
+        <code class="se-cmd">{{ sshExample }}</code>
+        <div v-if="needsGatewayHint" class="se-hint">{{ t('tunnels.sshExampleGatewayHint') }}</div>
+      </el-form-item>
     </el-form>
 
     <div v-if="errorMsg" class="form-error">{{ errorMsg }}</div>
 
     <template #footer>
+      <el-button
+        :loading="testing"
+        :disabled="testing || editRunning"
+        :title="editRunning ? t('tunnels.testDisabledRunning') : undefined"
+        @click="handleTest"
+      >{{ t('tunnels.test') }}</el-button>
       <el-button @click="visible = false">{{ t('tunnels.cancel') }}</el-button>
       <el-button type="primary" @click="handleSave">{{ t('tunnels.save') }}</el-button>
     </template>
@@ -108,6 +121,8 @@ import { ArrowRightToLine, ArrowLeftToLine, Waypoints } from '@lucide/vue'
 import { useTunnelStore, type TunnelMode } from '../stores/tunnelStore'
 import { useConnectionStore } from '../stores/connectionStore'
 import { useI18n } from '../i18n'
+import { msg } from '../services/message'
+import { TestTunnel } from '../../bindings/github.com/ys-ll/uniterm/app'
 
 const { t } = useI18n()
 const store = useTunnelStore()
@@ -180,14 +195,23 @@ watch(visible, (v) => {
   }
 })
 
-function handleSave() {
-  if (!form.name.trim()) { errorMsg.value = t('tunnels.errName'); return }
-  if (!form.sshConnId) { errorMsg.value = t('tunnels.errConn'); return }
-  if (!form.listenPort) { errorMsg.value = t('tunnels.errListenPort'); return }
-  if (form.mode !== 'dynamic' && (!form.targetHost.trim() || !form.targetPort)) {
-    errorMsg.value = t('tunnels.errTarget'); return
-  }
-  const payload = {
+// Editing a tunnel that is currently running: a test would grab the same
+// ports the live tunnel already holds, so disable it.
+const editRunning = computed(() => !!props.editingId && store.statusOf(props.editingId) === 'running')
+
+const testing = ref(false)
+
+// Shared by save and test: returns the validation message, or '' when valid.
+function validate(): string {
+  if (!form.sshConnId) return t('tunnels.errConn')
+  if (!form.listenPort) return t('tunnels.errListenPort')
+  if (form.mode !== 'dynamic' && (!form.targetHost.trim() || !form.targetPort)) return t('tunnels.errTarget')
+  return ''
+}
+
+function formPayload() {
+  return {
+    id: props.editingId || '',
     name: form.name.trim(),
     mode: form.mode,
     sshConnId: form.sshConnId,
@@ -198,6 +222,32 @@ function handleSave() {
     autoStart: form.autoStart,
     groupId: form.groupId,
   }
+}
+
+async function handleTest() {
+  const invalid = validate()
+  if (invalid) { errorMsg.value = invalid; return }
+  testing.value = true
+  try {
+    const st = await TestTunnel(formPayload())
+    if (st.status === 'running') {
+      msg.success(t('tunnels.testOk'))
+    } else {
+      msg.error(st.error || t('tunnels.testFailed'))
+    }
+  } catch (e: any) {
+    msg.error(String(e) || t('tunnels.testFailed'))
+  } finally {
+    testing.value = false
+  }
+}
+
+function handleSave() {
+  if (!form.name.trim()) { errorMsg.value = t('tunnels.errName'); return }
+  const invalid = validate()
+  if (invalid) { errorMsg.value = invalid; return }
+  const payload = formPayload()
+  delete payload.id
   if (props.editingId) {
     store.updateTunnel(props.editingId, payload)
   } else {
@@ -210,6 +260,24 @@ function resetForm() {
   Object.assign(form, blankForm())
   errorMsg.value = ''
 }
+
+// Equivalent ssh command — same syntax OpenSSH accepts, so the user can
+// cross-check the form against a command line they already know works.
+const sshExample = computed(() => {
+  const lh = (form.listenHost || '').trim() || '127.0.0.1'
+  const lp = form.listenPort || '<port>'
+  const th = (form.targetHost || '').trim() || '<targetHost>'
+  const tp = form.targetPort || '<targetPort>'
+  if (form.mode === 'local') return `ssh -L ${lh}:${lp}:${th}:${tp}`
+  if (form.mode === 'remote') return `ssh -R ${lh}:${lp}:${th}:${tp}`
+  return `ssh -D ${lh}:${lp}`
+})
+
+// A non-loopback remote bind only works when the server's sshd allows it.
+const needsGatewayHint = computed(() => {
+  const lh = (form.listenHost || '').trim() || '127.0.0.1'
+  return form.mode === 'remote' && !['127.0.0.1', 'localhost', '::1'].includes(lh)
+})
 </script>
 
 <style scoped>
@@ -220,6 +288,13 @@ function resetForm() {
 .hostport .colon { color: var(--text-muted); text-align: center; }
 .hostport :deep(.el-input-number) { width: 100%; }
 .form-error { color: var(--error); font-size: 12px; margin-top: 2px; }
+
+/* Equivalent ssh command row (a form item like the fields above) */
+.se-cmd {
+  font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-primary);
+  word-break: break-all; user-select: all;
+}
+.se-hint { width: 100%; font-size: 11px; color: var(--warning, #e0a54b); line-height: 1.4; }
 
 /* Mode buttons: identical look to the connection form's sub-type selection */
 .mode-section {

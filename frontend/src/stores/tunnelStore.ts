@@ -4,6 +4,7 @@ import { Events } from '@wailsio/runtime'
 import {
   LoadTunnels, SaveTunnels, StartTunnel, StopTunnel, ListTunnelStates,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { msg } from '../services/message'
 // Module-level un-subscribers for tunnel:state / store:tunnels:changed listeners.
 // Tracked at module scope so re-imports under HMR can detach the previous
 // listener before re-subscribing (FE-03).
@@ -78,9 +79,15 @@ export const useTunnelStore = defineStore('tunnels', () => {
     } catch (e) {
       console.error('Failed to list tunnel states:', e)
     }
-    // Live state pushes.
+    // Live state pushes. Errors are toasted here — one place covers manual
+    // starts, auto-start failures at app boot and mid-run disconnects.
+    let lastToastError = ''
     unsubTunnelState?.()
-    unsubTunnelState =Events.On('tunnel:state', (ev) => { const st: TunnelState = ev.data; 
+    unsubTunnelState =Events.On('tunnel:state', (ev) => { const st: TunnelState = ev.data;
+      if (st.status === 'error' && st.error && st.error !== lastToastError) {
+        lastToastError = st.error
+        msg.error(st.error)
+      }
       states.value = { ...states.value, [st.id]: st }
      })
     // Cross-window sync.
