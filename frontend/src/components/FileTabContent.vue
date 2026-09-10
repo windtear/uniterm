@@ -167,6 +167,8 @@ import {
   useEditorBridge, useNativeFileDrop, remoteFileOps, localFileOps,
   resolveRemoteTarget, resolveLocalTarget, joinPath, autoRename,
 } from '../composables/useFilePanel'
+import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/usePanelReconnect'
+import { isConnectionLostError } from '../utils/fileTransferUtils'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
@@ -237,6 +239,7 @@ const remoteListing = useFileListing({
   list: SftpListRemote,
   changeDir: SftpChangeRemoteDir,
   resolveTarget: resolveRemoteTarget,
+  onListError: onRemoteListError,
 })
 const localListing = useFileListing({
   sid: () => panel.value?.sessionId ?? undefined,
@@ -261,6 +264,35 @@ const {
   cwd: localCwd, files: localFiles, loading: loadingLocal,
   onRefresh: onRefreshLocal, onNavigate: onLocalNavigate, onCancelLoad: onCancelLoadLocal,
 } = localListing
+
+// Auto-reconnect when a remote listing/navigation hits a dead session (used to
+// toast "connection lost" on every refresh with no way back except closing the
+// tab). A disconnect is detected either from the error wording or from the
+// session's own status; then the shared panel-reconnect flow (same one the tab
+// right-click 「重连」 uses) brings up a fresh session and the listing reloads
+// once. Returns true so the generic error toast is suppressed whenever we took
+// over — including when the reconnect itself failed (it reports its own error).
+async function onRemoteListError(err: string): Promise<boolean> {
+  const panel = panelStore.getPanel(props.panelId)
+  if (!panel?.config) return false
+  let connected = false
+  try {
+    const sessions = await ListSessions()
+    connected = sessions.find(s => s.id === panel.sessionId)?.status === 'connected'
+  } catch { /* status unknown — treat as disconnected */ }
+  if (connected && !isConnectionLostError(err)) return false
+  if (!isPanelReconnecting(props.panelId)) {
+    msg.warning(t('sftp.reconnecting'))
+  }
+  try {
+    const newId = await reconnectFileTransferPanel(props.panelId)
+    if (newId) onRefreshRemote()
+    else msg.error(t('tab.reconnectFailed'))
+  } catch (e: any) {
+    msg.error(`${t('tab.reconnectFailed')}: ${e?.message || String(e)}`)
+  }
+  return true
+}
 
 const remotePanel = useFilePanel({
   sid: () => panel.value?.sessionId,

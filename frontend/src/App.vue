@@ -218,6 +218,7 @@ import type { ConnectionConfig } from './types/session'
 import { Application, Clipboard, Events } from '@wailsio/runtime'
 import { parseQuickConnect } from './utils/quickConnect'
 import { fileTransferProto } from './utils/fileTransferUtils'
+import { reconnectFileTransferPanel } from './composables/usePanelReconnect'
 
 const bgDataUrl = ref('')
 
@@ -1981,24 +1982,13 @@ async function reconnectMonitorPanel(panel: { id: string; sessionId: string | nu
   }
 }
 
-// Force-reconnect a file-transfer panel (sftp/ftp/smb/webdav/s3). Like database
-// and monitor, the session is created in App.vue; its type string equals
-// config.type. The tab content reads the session from the panel reactively.
+// Force-reconnect a file-transfer panel (sftp/ftp/smb/webdav/s3). The actual
+// close→create→rebind orchestration lives in usePanelReconnect, shared with
+// the refresh-triggered auto-reconnect in the file tab content.
 async function reconnectSftpPanel(panel: { id: string; sessionId: string | null; config: ConnectionConfig | null }) {
-  const oldId = panel.sessionId
-  if (oldId) {
-    try { await CloseSession(oldId) } catch (_) {}
-  }
-  const cfg = panel.config
-  if (!cfg || !cfg.type) return
   try {
-    // SSH-based file panels carry the protocol preference on the config; the
-    // file-transfer types (ftp/smb/...) already match their session type.
-    const proto = fileTransferProto(cfg)
-    const sessionType = cfg.type === 'ssh' ? proto : cfg.type
-    const info = await CreateSession(sessionType, cfg)
-    panelStore.bindSession(panel.id, info.id)
-    sessionStore.initSession(info.id)
+    const newId = await reconnectFileTransferPanel(panel.id)
+    if (!newId) panelStore.updateStatus(panel.id, 'error')
   } catch (e: any) {
     panelStore.updateStatus(panel.id, 'error')
     msg.error(`${t('tab.reconnectFailed')}: ${e?.message || String(e)}`)

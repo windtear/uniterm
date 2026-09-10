@@ -645,8 +645,9 @@ export function useFileListing(opts: {
   listTimeoutMs?: number
   /** Called after a successful list (e.g. drive-letter refresh). */
   afterList?: (dir: string) => Promise<void> | void
-  /** Return true when the error was fully handled (no generic toast). */
-  onListError?: (err: string) => boolean | void
+  /** Return true when the error was fully handled (no generic toast). May be
+   *  async (e.g. an auto-reconnect that decides after a status check). */
+  onListError?: (err: string) => boolean | void | Promise<boolean | void>
   onListSuccess?: () => void
 }) {
   const cwd = ref(opts.initialDir ?? '')
@@ -672,7 +673,7 @@ export function useFileListing(opts: {
     } catch (e: any) {
       if (v !== version) return
       const err = e?.toString?.() || String(e)
-      if (opts.onListError?.(err)) return
+      if (await opts.onListError?.(err)) return
       msg.error(err)
     } finally {
       if (v === version) loading.value = false
@@ -693,7 +694,9 @@ export function useFileListing(opts: {
       await opts.afterList?.(result.dir)
     } catch (e: any) {
       if (v !== version) return
-      msg.error(e?.toString?.() || String(e))
+      const err = e?.toString?.() || String(e)
+      if (await opts.onListError?.(err)) return
+      msg.error(err)
     } finally {
       if (v === version) loading.value = false
     }
