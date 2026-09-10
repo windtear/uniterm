@@ -84,7 +84,7 @@ func probeSSH(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods := makeSSHAuthMethods(config, kb)
+	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
@@ -94,7 +94,7 @@ func probeSSH(config ConnectionConfig) (string, error) {
 	}
 	// Honor a materialized proxy (set by App.materializeProxy) on the first hop,
 	// mirroring the terminal session's dial path.
-	client, err := dialSSHWithCipherFallback(addr, clientConfig, func() (net.Conn, error) {
+	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func probeSFTP(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods := makeSSHAuthMethods(config, kb)
+	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
@@ -119,7 +119,7 @@ func probeSFTP(config ConnectionConfig) (string, error) {
 		Timeout:         15 * time.Second,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	client, err := dialSSHWithCipherFallback(addr, clientConfig, func() (net.Conn, error) {
+	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ func probeSCP(config ConnectionConfig) (string, error) {
 	kb := func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 		return nil, fmt.Errorf("interactive auth not allowed during connection test")
 	}
-	authMethods := makeSSHAuthMethods(config, kb)
+	authMethods, kbAuth := splitSSHAuthMethods(config, kb)
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
@@ -148,7 +148,7 @@ func probeSCP(config ConnectionConfig) (string, error) {
 		Timeout:         15 * time.Second,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	client, err := dialSSHWithCipherFallback(addr, clientConfig, func() (net.Conn, error) {
+	client, err := dialSSHWithAuthRetry(addr, clientConfig, kbAuth, func() (net.Conn, error) {
 		return dialFirstHop(addr, config.Proxy)
 	})
 	if err != nil {
