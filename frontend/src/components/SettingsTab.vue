@@ -563,6 +563,18 @@
               <el-switch :model-value="settingsStore.settings.terminal.aiTranscription ?? true" @update:model-value="(v: boolean) => { settingsStore.settings.terminal.aiTranscription = v; settingsStore.save() }" />
             </div>
           </div>
+
+          <!-- Local-only preference (local_state.json, never synced). macOS
+               only: the patched input path is a WKWebView workaround. -->
+          <div v-if="isMac" class="setting-card">
+            <div class="setting-info">
+              <div class="setting-title">{{ t('settings.imeCompatibility') }}</div>
+              <div class="setting-desc">{{ t('settings.imeCompatibilityDesc') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-switch :model-value="localStateStore.state.imeCompatibility ?? true" @update:model-value="(v: boolean) => localStateStore.update({ imeCompatibility: v })" />
+            </div>
+          </div>
         </div>
 
         <h2 class="section-title" style="margin-top: 28px">{{ t('settings.session') }}</h2>

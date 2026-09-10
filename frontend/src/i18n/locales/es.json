@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "Mostrar sugerencias del historial y de la IA mientras escribe",
   "settings.aiTranscription": "Transcripción IA",
   "settings.aiTranscriptionDesc": "Sugerir reescrituras de comandos mediante IA mientras escribe (requiere clave API)",
+  "settings.imeCompatibility": "Modo de compatibilidad con IME",
+  "settings.imeCompatibilityDesc": "Entrega directamente al terminal los caracteres tecleados en macOS cuando un método de entrada marca las teclas como en composición, corrigiendo la pérdida o duplicación de caracteres al escribir rápido",
   "settings.fetchModels": "Obtener modelos",
   "settings.fetchModelsSuccess": "{connCount} modelos obtenidos",
   "settings.fetchModelsFailed": "Error al obtener modelos",

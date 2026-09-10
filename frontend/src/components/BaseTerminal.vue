@@ -811,34 +811,6 @@ function handleTerminalKey(e: KeyboardEvent): boolean {
   // Check global shortcuts first (Ctrl+Shift+/Alt+ combos)
   if (e.type === 'keydown' && !onTerminalKey(e)) return false
 
-  // macOS 26/27 beta: the first letter typed right after toggling Caps Lock
-  // arrives with keyCode 229 (the IME "composing" code) despite no real
-  // composition, so xterm's CompositionHelper swallows it and it only appears
-  // on the next keystroke (upstream xtermjs/xterm.js#5887, issue #483). keyCode
-  // 229 never fires for an ordinary letter key, and we further require Caps Lock
-  // on + an uppercase A–Z so lowercase IME composition (pinyin's first key) is
-  // untouched — re-inject the char through the normal onData pipeline ourselves.
-  if (
-    isMac &&
-    e.type === 'keydown' &&
-    e.keyCode === 229 &&
-    !e.isComposing &&
-    e.getModifierState('CapsLock') &&
-    /^[A-Z]$/.test(e.key) &&
-    !e.ctrlKey && !e.metaKey && !e.altKey &&
-    (props.mode === 'ssh' || props.mode === 'local')
-  ) {
-    e.preventDefault()
-    // terminal.input() sends the character via triggerDataEvent. Tell
-    // xterm's internal _keyDownHandled flag that this key was already
-    // processed so _keyPress won't fire a second triggerDataEvent.
-    // Without this, _keyPress fires because _keyDownHandled is never set
-    // in the workaround path → same character sent twice.
-    ;(terminal as any)._keyDownHandled = true
-    terminal?.input(e.key)
-    return false
-  }
-
   // A bare modifier key (Shift/Ctrl/Alt/Meta held alone) produces no input, yet
   // xterm's _keyDown still runs and, with scrollOnUserInput=true, fires
   // scrollToBottom() — yanking the viewport back to the bottom when the user

@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "Verlaufs- und KI-Vorschläge beim Tippen anzeigen",
   "settings.aiTranscription": "KI-Transkription",
   "settings.aiTranscriptionDesc": "KI-basierte Befehlsvorschläge beim Tippen (API-Key erforderlich)",
+  "settings.imeCompatibility": "IME-Kompatibilitätsmodus",
+  "settings.imeCompatibilityDesc": "Übergibt unter macOS Zeichen direkt an das Terminal, wenn eine Eingabemethode Tastenanschläge als Komposition markiert, und behebt so verlorene oder doppelte Zeichen bei schneller Eingabe",
   "settings.fetchModels": "Modelle abrufen",
   "settings.fetchModelsSuccess": "{connCount} Modelle abgerufen",
   "settings.fetchModelsFailed": "Modelle konnten nicht abgerufen werden",

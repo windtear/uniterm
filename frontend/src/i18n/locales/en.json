@@ -406,6 +406,8 @@
   "settings.smartCompletionDesc": "Show history and AI suggestions while typing",
   "settings.aiTranscription": "AI Transcription",
   "settings.aiTranscriptionDesc": "Suggest command rewrites via AI when typing (requires API key configured)",
+  "settings.imeCompatibility": "IME Compatibility Mode",
+  "settings.imeCompatibilityDesc": "Delivers typed characters directly when an input method marks keystrokes as composing on macOS, fixing dropped or duplicated input when typing fast",
   "settings.fetchModels": "Fetch Models",
   "settings.fetchModelsSuccess": "Fetched {count} models",
   "settings.fetchModelsFailed": "Failed to fetch models",
