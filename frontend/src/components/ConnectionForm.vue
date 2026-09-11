@@ -1643,8 +1643,9 @@ async function onTest() {
   let config: ConnectionConfig
   try {
     config = normalizeForm()
-  } catch {
-    // Host / required field empty; silently return like onSave/onConnect.
+  } catch (e: any) {
+    // 表单校验失败（如必填字段为空）；把错误提示出来而不是静默返回。
+    msg.error(e?.message || String(e))
     return
   }
   testStatus.value = 'checking'
@@ -1669,7 +1670,8 @@ function onSave() {
       resetForm()
     }
   } catch (e: any) {
-    // Host empty, silently return
+    // 表单校验失败（如必填字段为空）；提示错误并保持对话框打开。
+    msg.error(e?.message || String(e))
   }
 }
 
@@ -1684,7 +1686,8 @@ function onConnectOnly() {
       resetForm()
     }
   } catch (e: any) {
-    // Host empty
+    // 表单校验失败（如必填字段为空）；提示错误并保持对话框打开。
+    msg.error(e?.message || String(e))
   }
 }
 
@@ -1699,7 +1702,8 @@ function onConnect() {
       resetForm()
     }
   } catch (e: any) {
-    // Host empty
+    // 表单校验失败（如必填字段为空）；提示错误并保持对话框打开。
+    msg.error(e?.message || String(e))
   }
 }
 </script>
