@@ -293,6 +293,7 @@
   "sftp.connectError": "Échec de la connexion SFTP",
   "sftp.reconnecting": "Connexion perdue, reconnexion…",
   "sftp.dropHere": "Déposer les fichiers ici",
+  "sftp.followPath": "Suivre le chemin du terminal",
   "sftp.upload": "Téléverser",
   "sftp.downloadTo": "Télécharger vers...",
   "sftp.loading": "Chargement...",

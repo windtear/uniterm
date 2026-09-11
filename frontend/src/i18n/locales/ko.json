@@ -293,6 +293,7 @@
   "sftp.connectError": "SFTP 연결 실패",
   "sftp.reconnecting": "연결이 끊어졌습니다. 다시 연결 중…",
   "sftp.dropHere": "여기에 파일을 놓으세요",
+  "sftp.followPath": "터미널 경로 따라가기",
   "sftp.upload": "업로드",
   "sftp.downloadTo": "다운로드 위치...",
   "sftp.loading": "불러오는 중...",

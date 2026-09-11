@@ -293,6 +293,7 @@
   "sftp.connectError": "SFTP 连接失败",
   "sftp.reconnecting": "连接已断开，正在重新连接…",
   "sftp.dropHere": "拖动文件到此处",
+  "sftp.followPath": "跟随终端路径",
   "sftp.upload": "上传",
   "sftp.downloadTo": "下载到...",
   "sftp.loading": "加载中...",

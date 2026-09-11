@@ -293,6 +293,7 @@
   "sftp.connectError": "SFTP connection failed",
   "sftp.reconnecting": "Connection lost, reconnecting…",
   "sftp.dropHere": "Drop files here",
+  "sftp.followPath": "Follow terminal path",
   "sftp.upload": "Upload",
   "sftp.downloadTo": "Download to...",
   "sftp.loading": "Loading...",

@@ -293,6 +293,7 @@
   "sftp.connectError": "SFTP-Verbindung fehlgeschlagen",
   "sftp.reconnecting": "Verbindung verloren, wird neu verbunden…",
   "sftp.dropHere": "Dateien hier ablegen",
+  "sftp.followPath": "Terminalpfad folgen",
   "sftp.upload": "Hochladen",
   "sftp.downloadTo": "Herunterladen nach...",
   "sftp.loading": "Laden...",

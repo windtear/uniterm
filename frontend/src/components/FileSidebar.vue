@@ -81,6 +81,13 @@
         <template #actions>
           <button
             class="filter-icon-btn"
+            :class="{ active: followActive }"
+            :disabled="!followSupported"
+            :title="t('sftp.followPath')"
+            @click="toggleFollow"
+          ><el-icon><FolderSync :size="14" /></el-icon></button>
+          <button
+            class="filter-icon-btn"
             :disabled="!sessionId"
             :title="t('companion.openSftpTab')"
             @click="openStandaloneSftp"
@@ -134,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ExternalLink } from '@lucide/vue'
+import { ExternalLink, FolderSync } from '@lucide/vue'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from '../i18n'
 import { msg } from '../services/message'
@@ -272,6 +279,51 @@ function openStandaloneSftp() {
   if (!panel) return
   const ev = companionStore.isWslPanel(pid) ? 'app:connect-wsl-file' : 'app:connect-sftp'
   window.dispatchEvent(new CustomEvent(ev, { detail: panel }))
+}
+
+// ── "Follow terminal path" (per-panel toggle) ──
+// When enabled for the active SSH/WSL panel, the sidebar navigates whenever the
+// panel's terminal shell reports a cwd change (terminal:cwd, emitted by the
+// backend on OSC 7 / shell integration). The flag is per panel id and
+// ephemeral; rapid cd chains are debounced (trailing) so only the last path
+// navigates.
+const followActive = computed(() => {
+  const pid = companionStore.activeFilesPanelId
+  return !!pid && !!companionStore.followPathByPanel[pid]
+})
+// Following requires an SSH or WSL terminal panel (the only panels that emit
+// terminal:cwd with POSIX paths).
+const followSupported = computed(() => !!companionStore.activeFilesPanelId)
+
+function toggleFollow() {
+  const pid = companionStore.activeFilesPanelId
+  if (!pid) return
+  companionStore.toggleFollowPath(pid)
+}
+
+let followTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleFollowNavigate(path: string) {
+  if (followTimer) clearTimeout(followTimer)
+  followTimer = setTimeout(() => {
+    followTimer = null
+    // Re-check: the sidebar may have navigated elsewhere during the debounce.
+    if (path === cwd.value) return
+    onNavigate(path)
+  }, 300)
+}
+
+let unsubCwd: (() => void) | null = null
+
+function onTerminalCwd(ev: { data?: unknown }) {
+  const p = ev?.data as { sessionId?: string; cwd?: string } | undefined
+  if (!p?.sessionId || !p.cwd) return
+  // Only the active SSH/WSL panel's own terminal session drives navigation.
+  const pid = companionStore.activeFilesPanelId
+  if (!pid || !companionStore.followPathByPanel[pid]) return
+  const panel = panelStore.getPanel(pid)
+  if (!panel || panel.sessionId !== p.sessionId) return
+  if (!p.cwd.startsWith('/')) return // Windows local terminals are out of scope
+  scheduleFollowNavigate(p.cwd)
 }
 
 // "Copy path to terminal" (FileList context menu): the clipboard write already
@@ -434,6 +486,8 @@ watch(() => companionStore.activeFilesPanelId, () => {
 
 onMounted(() => {
   bindListeners()
+  // Terminal cwd reports (OSC 7 / shell integration) for path following.
+  unsubCwd = Events.On('terminal:cwd', onTerminalCwd)
   // Re-mounting after the view was hidden (e.g. switching files<->monitor):
   // restore this panel's cached listing since the session didn't change.
   restoreCache()
@@ -447,8 +501,10 @@ onUnmounted(() => {
   unsubStatus?.()
   unsubData?.()
   unsubExtEdit?.()
+  unsubCwd?.()
   unbindFileDrop()
   if (refreshTimer) clearTimeout(refreshTimer)
+  if (followTimer) clearTimeout(followTimer)
 })
 </script>
 
@@ -501,6 +557,10 @@ onUnmounted(() => {
 .filter-icon-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.filter-icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
 }
 .transfer-badge {
   position: absolute;
