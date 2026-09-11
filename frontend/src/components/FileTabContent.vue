@@ -104,9 +104,12 @@
         />
       </div>
     </div>
+    <!-- The panel bar is always visible; collapsing hides only the task list
+         (the persisted flag now tracks "list expanded", default collapsed). -->
     <TransferPanel
-      v-show="settingsStore.sftpTransferPanelVisible"
       v-model:height="transferHeight"
+      :collapsed="!settingsStore.sftpTransferPanelVisible"
+      @update:collapsed="(v: boolean) => settingsStore.sftpTransferPanelVisible = !v"
       resizable
       :tasks="transferTasks"
       @cancel="onCancelTransfer"
@@ -114,15 +117,7 @@
       @resume="onResumeTransfer"
       @retry="onRetryTransfer"
       @clearCompleted="clearFinishedTransfers"
-    >
-      <template #actions>
-        <button
-          class="filter-icon-btn"
-          :title="t('sftp.transferPanel.hide')"
-          @click="toggleTransferPanel"
-        ><el-icon><ChevronDown :size="14" /></el-icon></button>
-      </template>
-    </TransferPanel>
+    />
 
     <!-- Custom Dialog (shared) -->
     <FileGenericDialog
@@ -198,7 +193,6 @@ import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/
 import { isConnectionLostError, supportsRemoteSymlink } from '../utils/fileTransferUtils'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
-import { ChevronDown } from '@lucide/vue'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
 
 const props = defineProps<{
@@ -460,10 +454,6 @@ watch(() => transferTasks.map(t => t.id).join('|'), () => {
     settingsStore.sftpTransferPanelVisible = true
   }
 })
-
-function toggleTransferPanel() {
-  settingsStore.sftpTransferPanelVisible = !settingsStore.sftpTransferPanelVisible
-}
 
 // A fast-connecting session (e.g. S3) can emit session:status 'connected' before
 // this panel binds its sessionId, so the connected-event handler and a mount-time

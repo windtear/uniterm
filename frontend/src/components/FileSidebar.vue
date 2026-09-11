@@ -68,9 +68,12 @@
         />
       </div>
 
-      <!-- Transfer history / progress panel (pinned at the sidebar bottom) -->
+      <!-- Transfer history / progress panel (pinned at the sidebar bottom).
+           Defaults to collapsed; a new transfer expands it (see the watcher). -->
       <TransferPanel
         v-model:height="transferHeight"
+        :collapsed="sidebarTransferCollapsed"
+        @update:collapsed="(v: boolean) => sidebarTransferCollapsed = v"
         resizable
         :tasks="transferTasks"
         @cancel="onCancelTransfer"
@@ -87,6 +90,8 @@
             :title="t('sftp.followPath')"
             @click="toggleFollow"
           ><el-icon><FolderSync :size="14" /></el-icon></button>
+        </template>
+        <template #actions-end>
           <button
             class="filter-icon-btn"
             :disabled="!sessionId"
@@ -178,6 +183,10 @@ const connecting = ref(false)
 const connectError = ref('')
 // Transfer panel: default height (px), adjustable by dragging its top edge.
 const transferHeight = ref(130)
+// The transfer panel starts COLLAPSED (only its button bar shows) and a new
+// transfer expands it — the user can always re-collapse via the bar's toggle.
+const sidebarTransferCollapsed = ref(true)
+const seenTransferIds = new Set<string>()
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshDebounce: ReturnType<typeof setTimeout> | null = null
@@ -189,6 +198,15 @@ const FILE_DROP_ID = 'file-sidebar-drop'
 const sessionId = computed(() => companionStore.currentSftpSessionId)
 const transferKey = computed(() => companionStore.transferKey || 'companion-sftp')
 const transferTasks = computed(() => panelStore.getTransferTasks(transferKey.value))
+// Auto-expand the collapsed panel whenever a NEW transfer task appears.
+watch(transferTasks, (tasks) => {
+  for (const task of tasks) {
+    if (!seenTransferIds.has(task.id)) {
+      seenTransferIds.add(task.id)
+      sidebarTransferCollapsed.value = false
+    }
+  }
+})
 const transferEvents = useTransferTaskEvents(
   () => transferTasks.value,
   () => sessionId.value,
@@ -290,7 +308,7 @@ function openStandaloneSftp() {
 // navigates.
 const followActive = computed(() => {
   const pid = companionStore.activeFilesPanelId
-  return !!pid && !!companionStore.followPathByPanel[pid]
+  return !!pid && companionStore.followPathByPanel[pid] !== false
 })
 // Following requires an SSH or WSL terminal panel (the only panels that emit
 // terminal:cwd with POSIX paths).
@@ -320,7 +338,7 @@ function onTerminalCwd(ev: { data?: unknown }) {
   if (!p?.sessionId || !p.cwd) return
   // Only the active SSH/WSL panel's own terminal session drives navigation.
   const pid = companionStore.activeFilesPanelId
-  if (!pid || !companionStore.followPathByPanel[pid]) return
+  if (!pid || companionStore.followPathByPanel[pid] === false) return
   const panel = panelStore.getPanel(pid)
   if (!panel || panel.sessionId !== p.sessionId) return
   if (!p.cwd.startsWith('/')) return // Windows local terminals are out of scope

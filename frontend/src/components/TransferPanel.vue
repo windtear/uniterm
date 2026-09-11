@@ -2,25 +2,34 @@
   <div
     ref="panelRef"
     class="transfer-panel"
-    :style="resizable && height != null ? { height: height + 'px' } : undefined"
+    :class="{ 'transfer-panel-collapsed': collapsed }"
+    :style="resizable && !collapsed && height != null ? { height: height + 'px' } : undefined"
   >
-    <div v-if="resizable" class="transfer-panel-resize" @mousedown.prevent="onResizeStart" />
+    <div v-if="resizable && !collapsed" class="transfer-panel-resize" @mousedown.prevent="onResizeStart" />
     <div class="transfer-panel-head">
       <div class="transfer-panel-actions">
+        <!-- Collapse toggle: pinned far left; collapsing hides ONLY the task
+             list — this button bar stays so the panel can be re-expanded. -->
+        <button
+          class="filter-icon-btn"
+          :title="collapsed ? t('sftp.transferPanel.show') : t('sftp.transferPanel.hide')"
+          @click="emit('update:collapsed', !collapsed)"
+        ><el-icon><ChevronDown v-if="!collapsed" :size="14" /><ChevronUp v-else :size="14" /></el-icon></button>
         <span v-if="title" class="transfer-panel-title">{{ title }}</span>
+      </div>
+      <div class="transfer-panel-actions">
+        <slot name="actions" />
         <button
           class="filter-icon-btn"
           :disabled="!hasFinished"
           :title="t('companion.clearTransfers')"
           @click="emit('clearCompleted')"
         ><el-icon><BrushCleaning :size="14" /></el-icon></button>
-      </div>
-      <div class="transfer-panel-actions">
-        <slot name="actions" />
+        <slot name="actions-end" />
       </div>
     </div>
-    <div v-if="!tasks.length" class="transfer-empty">{{ t('companion.noTransfers') }}</div>
-    <div v-else class="transfer-progress-bar">
+    <div v-if="!collapsed && !tasks.length" class="transfer-empty">{{ t('companion.noTransfers') }}</div>
+    <div v-else-if="!collapsed" class="transfer-progress-bar">
       <div v-for="task in tasks" :key="task.id" class="transfer-task-wrap">
         <div class="transfer-task">
           <span class="task-type"><ArrowUp v-if="task.type === 'upload'" :size="12" /><ArrowDown v-else :size="12" /></span>
@@ -91,7 +100,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
-import { X, Pause, Play, ArrowUp, ArrowDown, Check, RotateCcw, BrushCleaning } from '@lucide/vue'
+import { X, Pause, Play, ArrowUp, ArrowDown, Check, RotateCcw, BrushCleaning, ChevronUp, ChevronDown } from '@lucide/vue'
 import { useI18n } from '../i18n'
 import type { TransferTaskUI } from '../stores/panelStore'
 
@@ -100,6 +109,8 @@ const props = defineProps<{
   height?: number
   resizable?: boolean
   title?: string
+  /** Collapsed = only the button bar is shown; the task list is hidden. */
+  collapsed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -109,6 +120,7 @@ const emit = defineEmits<{
   (e: 'retry', task: TransferTaskUI): void
   (e: 'clearCompleted'): void
   (e: 'update:height', h: number): void
+  (e: 'update:collapsed', v: boolean): void
 }>()
 
 const { t } = useI18n()
@@ -153,6 +165,10 @@ function onResizeStart(e: MouseEvent) {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-elevated);
   flex-shrink: 0;
+}
+/* Collapsed: only the button bar remains — no reserved body height. */
+.transfer-panel-collapsed {
+  min-height: 0;
 }
 .transfer-panel-resize {
   height: 4px;

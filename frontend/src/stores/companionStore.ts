@@ -284,8 +284,10 @@ export const useCompanionStore = defineStore('companion', () => {
     await ensureMonitor(pid)
   }
 
+  // Follow-terminal-path is DEFAULT-ON: the record only ever stores an
+  // explicit `false` (user turned it off); absence means enabled.
   function toggleFollowPath(panelId: string) {
-    const next = !followPathByPanel.value[panelId]
+    const next = followPathByPanel.value[panelId] === false
     followPathByPanel.value = { ...followPathByPanel.value, [panelId]: next }
   }
 
