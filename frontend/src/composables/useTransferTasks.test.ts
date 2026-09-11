@@ -10,7 +10,7 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
-import { useTransferTaskEvents } from './useTransferTasks'
+import { useTransferTaskEvents, buildSkipList } from './useTransferTasks'
 
 function fireTransfer(payload: any) {
   handlers['sftp:transfer']({ data: payload })
@@ -71,5 +71,37 @@ describe('useTransferTaskEvents', () => {
     expect(tasks[0].status).toBe('running')
     // Pause/resume is not a completion: the finished callback must not fire.
     expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it('stores the full source/target paths from the start payload', () => {
+    const tasks: any[] = []
+    const { bind } = useTransferTaskEvents(() => tasks, () => 'sid-1', vi.fn())
+    bind()
+    fireTransfer({
+      sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'up-1', event: 'start',
+      tfType: 'upload', name: 'big.bin', total: 10,
+      localPath: 'C:/data/big.bin', remotePath: '/srv/big.bin',
+    })
+    expect(tasks[0].localPath).toBe('C:/data/big.bin')
+    expect(tasks[0].remotePath).toBe('/srv/big.bin')
+  })
+})
+
+describe('buildSkipList', () => {
+  it('returns the relative paths of files already completed', () => {
+    const task: any = {
+      files: [
+        { path: 'a.txt', status: 'done' },
+        { path: 'b.txt', status: 'failed' },
+        { path: 'c.txt', status: 'running' },
+        { path: 'd.txt', status: 'done' },
+      ],
+    }
+    expect(buildSkipList(task)).toEqual(['a.txt', 'd.txt'])
+  })
+
+  it('returns an empty skip list for a task with no completed files', () => {
+    const task: any = { files: [{ path: 'b.txt', status: 'failed' }] }
+    expect(buildSkipList(task)).toEqual([])
   })
 })

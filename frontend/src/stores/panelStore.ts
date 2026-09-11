@@ -12,6 +12,10 @@ export interface TransferTaskUI {
   id: string
   type: 'upload' | 'download'
   name: string
+  // Full source/target paths from the backend's start payload — the retry
+  // spec round-trips these back to SftpRetryTransfer.
+  localPath: string
+  remotePath: string
   percentage: number
   speed: string
   eta: string

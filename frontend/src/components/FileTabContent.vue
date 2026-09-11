@@ -99,6 +99,7 @@
       @cancel="onCancelTransfer"
       @pause="onPauseTransfer"
       @resume="onResumeTransfer"
+      @retry="onRetryTransfer"
       @clearCompleted="clearFinishedTransfers"
     />
 
@@ -333,7 +334,7 @@ const {
   onRename, onDelete, onMkdir, onNewFile, onSymlink,
   onUpload, onDownloadTo,
   onEditFile, onEditExternal,
-  onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,
+  onCancelTransfer, onPauseTransfer, onResumeTransfer, onRetryTransfer, clearFinishedTransfers,
   onSaveBookmark, onRemoveBookmark,
   uploadPaths,
 } = remotePanel
@@ -353,14 +354,29 @@ let unsubscribeStatus: (() => void) | null = null
 let unsubscribeExt: (() => void) | null = null
 let initialNavDone = false
 
+// On disconnect/error nothing will ever complete the in-flight transfers, so
+// mark them (and their running files) failed here — otherwise they would sit
+// as "running" forever. Failed tasks become retryable in the transfer panel.
+function markTransferTasksDisconnected() {
+  for (const t of transferTasks) {
+    if (t.status === 'running' || t.status === 'paused') {
+      t.status = 'error'
+      t.files.forEach(f => { if (f.status === 'running') f.status = 'failed' })
+    }
+  }
+}
+
 onMounted(async () => {
-  unsubscribeStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data; 
+  unsubscribeStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data;
     if (payload.id === panel.value?.sessionId) {
       if (payload.status === 'connected') {
         onRefreshLocal()
         onRefreshRemote().then(() => doInitialAutoNav())
       } else if (payload.status === 'error') {
+        markTransferTasksDisconnected()
         msg.error(t('sftp.connectError'))
+      } else if (payload.status === 'disconnected') {
+        markTransferTasksDisconnected()
       }
     }
    })

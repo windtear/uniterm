@@ -69,6 +69,7 @@
         @cancel="onCancelTransfer"
         @pause="onPauseTransfer"
         @resume="onResumeTransfer"
+        @retry="onRetryTransfer"
         @clearCompleted="clearFinishedTransfers"
       >
         <template #actions>
@@ -288,7 +289,7 @@ const {
   onRename, onDelete, onMkdir, onNewFile, onSymlink,
   onUpload, onDownloadTo,
   onEditFile, onEditExternal,
-  onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,
+  onCancelTransfer, onPauseTransfer, onResumeTransfer, onRetryTransfer, clearFinishedTransfers,
   onSaveBookmark, onRemoveBookmark,
   uploadPaths,
 } = useFilePanel({
@@ -309,16 +310,31 @@ let unsubStatus: (() => void) | null = null
 let unsubData: (() => void) | null = null
 let unsubExtEdit: (() => void) | null = null
 
+// On disconnect/error nothing will ever complete the in-flight transfers, so
+// mark them (and their running files) failed here — otherwise they would sit
+// as "running" forever. Failed tasks become retryable in the transfer panel.
+function markTransferTasksDisconnected() {
+  for (const t of transferTasks.value) {
+    if (t.status === 'running' || t.status === 'paused') {
+      t.status = 'error'
+      t.files.forEach(f => { if (f.status === 'running') f.status = 'failed' })
+    }
+  }
+}
+
 function bindListeners() {
   unsubStatus?.()
   unsubData?.()
   unsubExtEdit?.()
-  unsubStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data; 
+  unsubStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data;
     if (payload.id !== sessionId.value) return
     if (payload.status === 'connected') {
       onRefresh()
     } else if (payload.status === 'error') {
+      markTransferTasksDisconnected()
       connectError.value = t('sftp.connectError')
+    } else if (payload.status === 'disconnected') {
+      markTransferTasksDisconnected()
     }
    })
   unsubData =Events.On('session:data', (ev) => { const payload: { id: string; data: string } = ev.data;

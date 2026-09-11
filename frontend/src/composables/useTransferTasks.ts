@@ -55,6 +55,8 @@ export function useTransferTaskEvents(
             id: msg.taskId,
             type: msg.tfType,
             name: msg.name,
+            localPath: msg.localPath || '',
+            remotePath: msg.remotePath || '',
             percentage: 0,
             speed: '',
             eta: '',
@@ -149,3 +151,10 @@ export function countFinishedTasks(tasks: TransferTaskUI[]): number {
   return tasks.filter(t => t.status === 'done' || t.status === 'error' || t.status === 'cancelled').length
 }
 
+/**
+ * Relative paths of files already completed — the retry skip list. Passed to
+ * SftpRetryTransfer so the backend only re-transfers what failed or never ran.
+ */
+export function buildSkipList(task: TransferTaskUI): string[] {
+  return task.files.filter(f => f.status === 'done').map(f => f.path)
+}

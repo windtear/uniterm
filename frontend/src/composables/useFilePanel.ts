@@ -6,12 +6,14 @@ import {
   SftpPut, SftpGet, SftpChmod, SftpSymlink,
   SftpLocalCopy, SftpLocalMove, SftpLocalRename, SftpLocalRemove, SftpLocalMkdir, SftpLocalPutContent,
   SftpCancelTransfer, SftpPauseTransfer, SftpResumeTransfer,
+  SftpRetryTransfer, SftpDismissTransfer,
   OpenMultipleFilesDialog, OpenDirectoryDialog,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { Events } from '@wailsio/runtime'
 import { useLocalStateStore } from '../stores/localStateStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { t as i18nT } from '../i18n'
+import { buildSkipList } from './useTransferTasks'
 import type { TransferTaskUI } from '../stores/panelStore'
 
 // --- Global external-edit toast ---------------------------------------------
@@ -593,11 +595,41 @@ export function useFilePanel(opts: FilePanelOptions) {
     try { await SftpResumeTransfer(id, taskId) } catch (e) { console.error('resume transfer:', e) }
   }
 
+  // Re-runs a failed transfer. The task stores the original full paths from the
+  // backend's start payload; completed files (per the per-file tracker) are
+  // skipped on the backend via the skip list.
+  async function onRetryTransfer(task: TransferTaskUI) {
+    const id = sid()
+    if (!id) return
+    const spec = {
+      type: task.type,
+      localPath: task.localPath,
+      remotePath: task.remotePath,
+      // Directory tasks carry per-file state; single files retry as-is.
+      recursive: task.fileCount > 0,
+    }
+    try {
+      await SftpRetryTransfer(id, spec, buildSkipList(task))
+    } catch (e) {
+      console.error('retry transfer:', e)
+    }
+  }
+
+  /** Drops a retained (failed) task from the backend's transfer registry. */
+  function onDismissTask(taskId: string) {
+    const id = sid()
+    if (!id) return
+    SftpDismissTransfer(id, taskId).catch(() => {})
+  }
+
   function clearFinishedTransfers() {
     const tasks = transferTasks()
     for (let i = tasks.length - 1; i >= 0; i--) {
       const st = tasks[i].status
       if (st === 'done' || st === 'error' || st === 'cancelled') {
+        // The backend only retains failed tasks; tell it to drop each one
+        // before the UI forgets the task id.
+        if (st === 'error') onDismissTask(tasks[i].id)
         tasks.splice(i, 1)
       }
     }
@@ -643,7 +675,8 @@ export function useFilePanel(opts: FilePanelOptions) {
     onUpload, onDownloadTo,
     onEditFile, onEditExternal,
     // transfer panel
-    onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,
+    onCancelTransfer, onPauseTransfer, onResumeTransfer,
+    onRetryTransfer, onDismissTask, clearFinishedTransfers,
     // bookmarks
     onSaveBookmark, onRemoveBookmark,
     // drag-drop upload
