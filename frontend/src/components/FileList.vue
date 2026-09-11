@@ -38,6 +38,10 @@
       <el-button type="primary" @click="emit('paste')">{{ t('sftp.paste') }}</el-button>
       <el-button @click="emit('clearClipboard')">{{ t('sftp.dialog.cancel') }}</el-button>
     </div>
+    <div v-if="selectionStats.count > 0" class="selection-bar">
+      <span class="selection-info">{{ t('sftp.selectionStats', { count: selectionStats.count }) }}</span>
+      <span v-if="selectionStats.size > 0">{{ formatSize(selectionStats.size) }}</span>
+    </div>
     <div class="table-wrapper" @contextmenu.prevent="onEmptyAreaContextMenu">
       <div v-if="loading || pasteLoading" class="loading-overlay">
         <div class="loading-content">
@@ -259,6 +263,14 @@ const tableRef = ref<any>(null)
 
 const targetSide = computed(() => props.mode === 'local' ? t('sftp.remote') : t('sftp.local'))
 const sendToKey = computed(() => props.mode === 'local' ? 'sftp.sendToRemote' : 'sftp.sendToLocal')
+
+// Footer stats for the current multi-selection. The '..' parent row is not a
+// real entry, so it never counts toward the item total or the size sum.
+const selectionStats = computed(() => {
+  const items = selectedItems.value.filter(i => i.name !== '..')
+  const totalSize = items.reduce((sum, i) => sum + (i.isDir ? 0 : i.size), 0)
+  return { count: items.length, size: totalSize }
+})
 
 const filteredFiles = computed(() => {
   let list = [...props.files]
@@ -560,6 +572,7 @@ function getRowClassName({ row }: { row: FileItem }): string {
   const cls: string[] = []
   if (props.cutItemNames && props.cutItemNames.includes(row.name)) cls.push('cut-item-row')
   if (row.name === quickTargetName.value) cls.push('quick-target-row')
+  if (isSelected(row)) cls.push('row-selected')
   return cls.join(' ')
 }
 
@@ -591,6 +604,10 @@ function onDragStart(event: DragEvent, row: FileItem) {
 /* Brief highlight shown while a quick-located row is in view (issue #700). */
 :deep(.quick-target-row) td {
   background-color: rgba(var(--color-primary, 64, 158, 255), 0.14);
+}
+/* Full-row background for every row in the current selection. */
+:deep(.row-selected) td {
+  background-color: var(--accent-subtle) !important;
 }
 /* Non-name columns read dimmer than the file name (issue #702). */
 .cell-secondary {
@@ -649,6 +666,18 @@ function onDragStart(event: DragEvent, row: FileItem) {
 .clipboard-info {
   flex: 1;
   color: var(--text-secondary);
+}
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.selection-info {
+  flex: 1;
 }
 .name-cell {
   display: flex;

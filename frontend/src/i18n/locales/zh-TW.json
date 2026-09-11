@@ -298,6 +298,7 @@
   "sftp.copy": "複製",
   "sftp.cut": "剪下",
   "sftp.paste": "貼上",
+  "sftp.selectionStats": "{{count}} item(s) selected",
   "sftp.newFile": "新增檔案",
   "sftp.dialog.editTitle": "編輯 — {path}",
   "sftp.dialog.newFileTitle": "新增檔案",

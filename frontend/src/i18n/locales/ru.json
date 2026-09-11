@@ -298,6 +298,7 @@
   "sftp.copy": "Копировать",
   "sftp.cut": "Вырезать",
   "sftp.paste": "Вставить",
+  "sftp.selectionStats": "{{count}} item(s) selected",
   "sftp.newFile": "Новый файл",
   "sftp.dialog.editTitle": "Редактировать — {path}",
   "sftp.dialog.newFileTitle": "Новый файл",
