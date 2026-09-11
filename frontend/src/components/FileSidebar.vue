@@ -170,7 +170,7 @@ import FileEditorDialog from './FileEditorDialog.vue'
 import FileGenericDialog from './FileGenericDialog.vue'
 import FileConflictDialog from './FileConflictDialog.vue'
 import { Events } from '@wailsio/runtime'
-import { useTransferTaskEvents } from '../composables/useTransferTasks'
+import { useTransferTaskEvents, watchNewTransferTasks } from '../composables/useTransferTasks'
 import { queuedSessionWrite } from '../services/sessionWriter'
 
 const { t } = useI18n()
@@ -186,7 +186,6 @@ const transferHeight = ref(130)
 // The transfer panel starts COLLAPSED (only its button bar shows) and a new
 // transfer expands it — the user can always re-collapse via the bar's toggle.
 const sidebarTransferCollapsed = ref(true)
-const seenTransferIds = new Set<string>()
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshDebounce: ReturnType<typeof setTimeout> | null = null
@@ -199,14 +198,7 @@ const sessionId = computed(() => companionStore.currentSftpSessionId)
 const transferKey = computed(() => companionStore.transferKey || 'companion-sftp')
 const transferTasks = computed(() => panelStore.getTransferTasks(transferKey.value))
 // Auto-expand the collapsed panel whenever a NEW transfer task appears.
-watch(transferTasks, (tasks) => {
-  for (const task of tasks) {
-    if (!seenTransferIds.has(task.id)) {
-      seenTransferIds.add(task.id)
-      sidebarTransferCollapsed.value = false
-    }
-  }
-})
+watchNewTransferTasks(() => transferTasks.value, () => { sidebarTransferCollapsed.value = false })
 const transferEvents = useTransferTaskEvents(
   () => transferTasks.value,
   () => sessionId.value,

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { nextTick, reactive } from 'vue'
 
 const handlers: Record<string, (ev: any) => void> = {}
 vi.mock('@wailsio/runtime', () => ({
@@ -10,7 +11,7 @@ vi.mock('@wailsio/runtime', () => ({
   },
 }))
 
-import { useTransferTaskEvents, buildSkipList } from './useTransferTasks'
+import { useTransferTaskEvents, buildSkipList, watchNewTransferTasks } from './useTransferTasks'
 
 function fireTransfer(payload: any) {
   handlers['sftp:transfer']({ data: payload })
@@ -100,6 +101,45 @@ describe('useTransferTaskEvents', () => {
     })
     expect(tasks[0].localPath).toBe('C:/data/big.bin')
     expect(tasks[0].remotePath).toBe('/srv/big.bin')
+  })
+})
+
+describe('watchNewTransferTasks', () => {
+  // Regression: watching the tasks array by reference (a computed that only
+  // returns it) never fires when tasks are pushed, so the sidebar transfer
+  // panel stayed collapsed. The watcher must track the task ids themselves.
+  it('fires when a new task id is pushed and not for in-place updates', async () => {
+    const tasks = reactive<any[]>([])
+    const onNew = vi.fn()
+    watchNewTransferTasks(() => tasks, onNew)
+    await nextTick()
+    expect(onNew).not.toHaveBeenCalled()
+
+    tasks.push({ id: 'dl-1' })
+    await nextTick()
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    // Progress mutations must not re-trigger.
+    tasks[0].percentage = 50
+    await nextTick()
+    expect(onNew).toHaveBeenCalledTimes(1)
+
+    tasks.push({ id: 'dl-2' })
+    await nextTick()
+    expect(onNew).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats a pre-populated list as new only when it changes', async () => {
+    const tasks = reactive<any[]>([{ id: 'dl-1' }])
+    const onNew = vi.fn()
+    watchNewTransferTasks(() => tasks, onNew)
+    await nextTick()
+    // Lazy watch: registration alone does not expand the panel.
+    expect(onNew).not.toHaveBeenCalled()
+
+    tasks.push({ id: 'dl-1b' })
+    await nextTick()
+    expect(onNew).toHaveBeenCalledTimes(1)
   })
 })
 

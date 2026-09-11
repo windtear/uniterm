@@ -1,4 +1,4 @@
-import { onUnmounted } from 'vue'
+import { onUnmounted, watch } from 'vue'
 import { Events } from '@wailsio/runtime'
 import type { TransferTaskUI } from '../stores/panelStore'
 
@@ -147,6 +147,26 @@ export function useTransferTaskEvents(
   onUnmounted(unbind)
 
   return { bind, unbind }
+}
+
+/**
+ * Fire onNew() when the task list gains at least one task id not seen before
+ * (used to auto-expand a collapsed transfer panel). The getter must READ the
+ * task ids — watching the array by reference never fires when tasks are pushed
+ * into it, which is how the sidebar's auto-expand broke once.
+ */
+export function watchNewTransferTasks(getTasks: () => TransferTaskUI[], onNew: () => void) {
+  const seen = new Set<string>()
+  watch(() => getTasks().map(t => t.id).join('|'), () => {
+    let hasNew = false
+    for (const task of getTasks()) {
+      if (!seen.has(task.id)) {
+        seen.add(task.id)
+        hasNew = true
+      }
+    }
+    if (hasNew) onNew()
+  })
 }
 
 /**

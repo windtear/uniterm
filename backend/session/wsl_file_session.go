@@ -280,8 +280,65 @@ func fileItemsFromDir(dir string, entries []os.DirEntry) []FileItem {
 
 // --- listing ---------------------------------------------------------------
 
+// wslMountLocalPath maps a POSIX path under /mnt/<drive> to the corresponding
+// local Windows path when the first segment is a single, existing drive letter;
+// otherwise ok is false and the caller stays on the wsl.localhost share.
+// Matching is case-insensitive (/mnt/C == /mnt/c); non-drive mounts such as
+// /mnt/wsl never map.
+func wslMountLocalPath(p string) (string, bool) {
+	rest, found := strings.CutPrefix(p, "/mnt/")
+	if !found {
+		return "", false
+	}
+	letter, tail := rest, ""
+	if i := strings.Index(rest, "/"); i >= 0 {
+		letter, tail = rest[:i], rest[i+1:]
+	}
+	if len(letter) != 1 {
+		return "", false
+	}
+	drive := strings.ToUpper(letter) + `:\`
+	if _, err := os.Stat(drive); err != nil {
+		return "", false
+	}
+	if tail == "" {
+		return drive, true
+	}
+	return filepath.Join(drive, filepath.FromSlash(tail)), true
+}
+
+// listMntRoot synthesizes the /mnt listing: the 9P share denies the
+// mountpoint, but its drive children are the local drives, so each existing
+// Windows drive is rendered as a lowercase directory named after the mount
+// (c, d, ...). Non-drive mounts cannot be enumerated from Windows and are
+// omitted.
+func (s *WSLFileSession) listMntRoot() FileListResult {
+	files := make([]FileItem, 0, 8)
+	if drives, err := s.ListLocalDrives(); err == nil {
+		for _, d := range drives {
+			files = append(files, FileItem{
+				Name:    strings.ToLower(d.Name[:1]),
+				ModTime: d.ModTime,
+				Mode:    "drwxr-xr-x",
+				IsDir:   true,
+			})
+		}
+	}
+	return FileListResult{Files: files, Dir: "/mnt"}
+}
+
 func (s *WSLFileSession) ListRemote(dir string) (FileListResult, error) {
 	d := s.resolveRemote(dir)
+	if d == "/mnt" {
+		return s.listMntRoot(), nil
+	}
+	if local, ok := wslMountLocalPath(d); ok {
+		entries, err := os.ReadDir(local)
+		if err != nil {
+			return FileListResult{}, err
+		}
+		return FileListResult{Files: fileItemsFromDir(local, entries), Dir: d}, nil
+	}
 	entries, err := os.ReadDir(s.uncPath(d))
 	if err != nil {
 		return FileListResult{}, s.shareError(d, err)
@@ -378,24 +435,59 @@ func (s *WSLFileSession) readlinkTarget(p string) (string, error) {
 	return t, nil
 }
 
+// canonicalPath resolves p with `readlink -f`, replacing EVERY symlink in the
+// path — last component or mid-path — with its real target; plain paths come
+// back unchanged. The 9P redirector cannot open a path crossing a link ("The
+// directory name is invalid"), so any path it will open must be canonical
+// first. Errors mean the path's parent chain is broken.
+func (s *WSLFileSession) canonicalPath(p string) (string, error) {
+	out, err := exec.Command("wsl.exe", "-d", s.distro, "--", "readlink", "-f", p).Output()
+	if err != nil {
+		return "", err
+	}
+	t := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(t, "/") {
+		return "", fmt.Errorf("not a path: %s", p)
+	}
+	return t, nil
+}
+
 func (s *WSLFileSession) ChangeRemoteDir(dir string) (FileListResult, error) {
 	d := s.resolveRemote(dir)
+	if d == "/mnt" {
+		s.cwd = d
+		return s.listMntRoot(), nil
+	}
+	if local, ok := wslMountLocalPath(d); ok {
+		fi, err := os.Stat(local)
+		if err != nil {
+			// Linux symlinks on a mounted drive are LX reparse points the
+			// Windows side cannot resolve (Stat fails); canonicalize via
+			// the distro and continue at the real target, like the
+			// share-side fallback below.
+			if canon, cerr := s.canonicalPath(d); cerr == nil && canon != d {
+				return s.ChangeRemoteDir(canon)
+			}
+			return FileListResult{}, err
+		}
+		if !fi.IsDir() {
+			return FileListResult{}, fmt.Errorf("not a directory: %s", d)
+		}
+		s.cwd = d
+		return s.ListRemote(d)
+	}
+	// Canonicalize before touching the share: a link anywhere in the path —
+	// the entry itself or mid-path (a stale cwd restored from cache/history)
+	// — makes every open fail ("The directory name is invalid"). Plain paths
+	// come back unchanged; a resolved target re-enters the full dispatch so
+	// one under /mnt maps to the local drive view.
+	if canon, cerr := s.canonicalPath(d); cerr == nil && canon != d {
+		return s.ChangeRemoteDir(canon)
+	}
 	fi, statErr := os.Stat(s.uncPath(d))
 	if statErr == nil && fi.IsDir() {
 		s.cwd = d
 		return s.ListRemote(d)
-	}
-	// The share cannot traverse symbolic links: Stat surfaces the link as a
-	// non-dir reparse point (or errors outright), and open fails with
-	// "cannot be resolved by the system". When the path is a link to a
-	// directory, continue at its real target so symlinked directories stay
-	// navigable — like the SFTP/SCP backends — with the breadcrumb showing
-	// the resolved path.
-	if target, terr := s.readlinkTarget(d); terr == nil && target != d {
-		if fi2, err2 := os.Stat(s.uncPath(target)); err2 == nil && fi2.IsDir() {
-			s.cwd = target
-			return s.ListRemote(target)
-		}
 	}
 	if statErr != nil {
 		// /mnt Windows-drive mounts are denied by the share (drive→WSL→drive
@@ -426,6 +518,9 @@ func (s *WSLFileSession) wslMountDrive(d string) string {
 // --- remote attributes / dirs ----------------------------------------------
 
 func (s *WSLFileSession) MakeDir(dir string) error {
+	if local, ok := wslMountLocalPath(s.resolveRemote(dir)); ok {
+		return os.Mkdir(local, 0o755)
+	}
 	return os.Mkdir(s.uncPath(s.resolveRemote(dir)), 0o755)
 }
 
@@ -455,6 +550,12 @@ func (s *WSLFileSession) Remove(p string, recursive bool) error {
 	if c == "/" || c == "." {
 		return fmt.Errorf("refusing to delete path: %s", c)
 	}
+	if local, ok := wslMountLocalPath(c); ok {
+		if recursive {
+			return os.RemoveAll(local)
+		}
+		return os.Remove(local)
+	}
 	full := s.uncPath(c)
 	if recursive {
 		return os.RemoveAll(full)
@@ -463,10 +564,18 @@ func (s *WSLFileSession) Remove(p string, recursive bool) error {
 }
 
 func (s *WSLFileSession) Rename(oldName, newName string) error {
+	oldL, oldOK := wslMountLocalPath(s.resolveRemote(oldName))
+	newL, newOK := wslMountLocalPath(s.resolveRemote(newName))
+	if oldOK && newOK {
+		return os.Rename(oldL, newL)
+	}
 	return os.Rename(s.uncPath(s.resolveRemote(oldName)), s.uncPath(s.resolveRemote(newName)))
 }
 
 func (s *WSLFileSession) Chmod(p string, mode os.FileMode) error {
+	if local, ok := wslMountLocalPath(s.resolveRemote(p)); ok {
+		return os.Chmod(local, mode)
+	}
 	return os.Chmod(s.uncPath(s.resolveRemote(p)), mode)
 }
 
@@ -474,22 +583,27 @@ func (s *WSLFileSession) Chmod(p string, mode os.FileMode) error {
 
 // uncPathResolved returns the UNC path for a POSIX remote path. Symbolic
 // links cannot be traversed through the wsl.localhost share (Stat surfaces
-// them as ModeIrregular reparse points and open fails), so when the path is
-// a link it resolves to the real target's UNC form via `readlink -f`;
-// ordinary paths return the plain UNC form unchanged.
+// them as ModeIrregular reparse points and open fails), so the path is
+// canonicalized via `readlink -f` — following a final-component link or
+// healing one mid-path (e.g. from a stale cwd). Ordinary paths return the
+// plain UNC form unchanged.
 func (s *WSLFileSession) uncPathResolved(remotePath string) string {
 	full := s.uncPath(remotePath)
 	if fi, err := os.Stat(full); err == nil && fi.Mode()&os.ModeIrregular == 0 {
 		return full
 	}
-	if target, terr := s.readlinkTarget(remotePath); terr == nil {
-		return s.uncPath(target)
+	if canon, cerr := s.canonicalPath(remotePath); cerr == nil {
+		return s.uncPath(canon)
 	}
 	return full
 }
 
 func (s *WSLFileSession) GetContent(remotePath string) ([]byte, error) {
-	b, err := os.ReadFile(s.uncPathResolved(s.resolveRemote(remotePath)))
+	p := s.resolveRemote(remotePath)
+	if local, ok := wslMountLocalPath(p); ok {
+		return os.ReadFile(local)
+	}
+	b, err := os.ReadFile(s.uncPathResolved(p))
 	if isShareTraverseErr(err) {
 		return nil, fmt.Errorf("cannot open %s: symbolic links cannot be traversed through the WSL file share", remotePath)
 	}
@@ -497,16 +611,30 @@ func (s *WSLFileSession) GetContent(remotePath string) ([]byte, error) {
 }
 
 func (s *WSLFileSession) PutContent(remotePath string, content []byte) error {
-	return os.WriteFile(s.uncPathResolved(s.resolveRemote(remotePath)), content, 0o644)
+	p := s.resolveRemote(remotePath)
+	if local, ok := wslMountLocalPath(p); ok {
+		return os.WriteFile(local, content, 0o644)
+	}
+	return os.WriteFile(s.uncPathResolved(p), content, 0o644)
 }
 
 func (s *WSLFileSession) Copy(oldPath, newPath string) error {
+	oldL, oldOK := wslMountLocalPath(s.resolveRemote(oldPath))
+	newL, newOK := wslMountLocalPath(s.resolveRemote(newPath))
+	if oldOK && newOK {
+		return copyPath(oldL, newL, nil)
+	}
 	return copyPath(s.uncPath(s.resolveRemote(oldPath)), s.uncPath(s.resolveRemote(newPath)), nil)
 }
 
 func (s *WSLFileSession) Move(oldPath, newPath string) error {
-	oldU := s.uncPath(s.resolveRemote(oldPath))
-	newU := s.uncPath(s.resolveRemote(newPath))
+	oldL, oldOK := wslMountLocalPath(s.resolveRemote(oldPath))
+	newL, newOK := wslMountLocalPath(s.resolveRemote(newPath))
+	oldU, newU := oldL, newL
+	if !oldOK || !newOK {
+		oldU = s.uncPath(s.resolveRemote(oldPath))
+		newU = s.uncPath(s.resolveRemote(newPath))
+	}
 	if err := os.Rename(oldU, newU); err == nil {
 		return nil
 	}
@@ -519,23 +647,29 @@ func (s *WSLFileSession) Move(oldPath, newPath string) error {
 // --- transfers ---------------------------------------------------------------
 
 func (s *WSLFileSession) Get(remotePath, localPath string, recursive bool) (string, error) {
-	return s.startLocalTransfer("download", s.resolveLocal(localPath), s.uncPathResolved(s.resolveRemote(remotePath)))
+	return s.startLocalTransfer("download", s.resolveLocal(localPath), s.resolveRemote(remotePath))
 }
 
 func (s *WSLFileSession) Put(localPath, remotePath string, recursive bool) (string, error) {
-	return s.startLocalTransfer("upload", s.resolveLocal(localPath), s.uncPathResolved(s.resolveRemote(remotePath)))
+	return s.startLocalTransfer("upload", s.resolveLocal(localPath), s.resolveRemote(remotePath))
 }
 
 // startLocalTransfer copies a file or tree between the Windows-local pane and
-// the WSL UNC path. Both endpoints are on the same machine, so this is a local
-// copy; a Task is reported through the usual OSC 633 transfer events so the
-// frontend TransferPanel stays in sync.
+// the WSL filesystem. Both endpoints are on the same machine, so this is a
+// local copy; a Task is reported through the usual OSC 633 transfer events so
+// the frontend TransferPanel stays in sync. remote is the POSIX display path;
+// the OS path behind it is the /mnt drive mapping when one applies, the
+// wsl.localhost UNC form otherwise.
 func (s *WSLFileSession) startLocalTransfer(tfType, local, remote string) (string, error) {
-	src := remote
+	remoteOS, ok := wslMountLocalPath(remote)
+	if !ok {
+		remoteOS = s.uncPathResolved(remote)
+	}
+	src := remoteOS
 	dst := local
 	if tfType == "upload" {
 		src = local
-		dst = remote
+		dst = remoteOS
 	}
 	total, err := dirSize(src)
 	if err != nil {

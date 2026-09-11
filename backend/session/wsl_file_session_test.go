@@ -5,7 +5,9 @@ package session
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -271,6 +273,158 @@ func TestWSLListRemoteSymlinkTypes(t *testing.T) {
 	}
 }
 
+// Entering a directory symlink must land on its canonical target and keep
+// navigating from there: the 9P redirector can Stat the link itself (following
+// the final component) but fails to open any path crossing it ("The directory
+// name is invalid"), so cwd must never hold an unresolved link path.
+func TestWSLChangeRemoteDirIntoSymlinkThenChild(t *testing.T) {
+	distro := wslTestDistro(t)
+	wsl := func(script string) {
+		t.Helper()
+		if out, err := exec.Command("wsl.exe", "-d", distro, "--", "sh", "-c", script).CombinedOutput(); err != nil {
+			t.Fatalf("wsl %q: %v: %s", script, err, out)
+		}
+	}
+	dir := fmt.Sprintf("/tmp/uniterm-symtest-%d", time.Now().UnixNano())
+	// Relative link target on purpose: readlink -f must canonicalize it.
+	wsl(fmt.Sprintf("mkdir -p '%s/real/sub' && printf hi > '%s/real/sub/inside.txt' && ln -sfn real '%s/af'", dir, dir, dir))
+	defer exec.Command("wsl.exe", "-d", distro, "--", "rm", "-rf", dir).Run()
+
+	s := &WSLFileSession{
+		baseSession: baseSession{sessionType: "wsl-file"},
+		distro:      distro,
+		root:        "//wsl.localhost/" + distro,
+		cwd:         dir,
+	}
+	res, err := s.ChangeRemoteDir("af")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(af) failed: %v", err)
+	}
+	if want := dir + "/real"; res.Dir != want || s.cwd != want {
+		t.Errorf("entering af: dir=%q cwd=%q, want %q", res.Dir, s.cwd, want)
+	}
+	// The child must be reachable from the canonical cwd (no link mid-path).
+	res2, err := s.ChangeRemoteDir("sub")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(sub) failed: %v", err)
+	}
+	if want := dir + "/real/sub"; res2.Dir != want {
+		t.Errorf("child dir = %q, want %q", res2.Dir, want)
+	}
+	found := false
+	for _, f := range res2.Files {
+		if f.Name == "inside.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("listing missing inside.txt: %+v", res2.Files)
+	}
+}
+
+// A symlink whose target lives on a mounted drive (e.g. a sysroot under
+// /mnt/c) must enter the mapped local-drive view: the share itself cannot
+// open any path into /mnt, with or without the link on the way.
+func TestWSLChangeRemoteDirSymlinkToMntTarget(t *testing.T) {
+	distro := wslTestDistro(t)
+	tmp := os.TempDir()
+	vol := filepath.VolumeName(tmp)
+	if len(vol) != 2 || vol[1] != ':' {
+		t.Skipf("TempDir %q is not on a drive letter", tmp)
+	}
+	posixTarget := "/mnt/" + strings.ToLower(vol[:1]) + filepath.ToSlash(tmp[2:]) + fmt.Sprintf("/uniterm-mnt-linkto-%d", time.Now().UnixNano())
+	localTarget := filepath.FromSlash(posixTarget[len("/mnt/x"):])
+	localTarget = vol + `\` + strings.TrimPrefix(localTarget, `\`)
+	if err := os.MkdirAll(filepath.Join(localTarget, "sub"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localTarget, "sub", "inside.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	defer os.RemoveAll(localTarget)
+
+	linkDir := fmt.Sprintf("/tmp/uniterm-mnt-link-%d", time.Now().UnixNano())
+	if out, err := exec.Command("wsl.exe", "-d", distro, "--", "sh", "-c",
+		fmt.Sprintf("mkdir -p '%s' && ln -sfn '%s' '%s/af'", linkDir, posixTarget, linkDir)).CombinedOutput(); err != nil {
+		t.Fatalf("wsl: %v: %s", err, out)
+	}
+	defer exec.Command("wsl.exe", "-d", distro, "--", "rm", "-rf", linkDir).Run()
+
+	s := &WSLFileSession{
+		baseSession: baseSession{sessionType: "wsl-file"},
+		distro:      distro,
+		root:        "//wsl.localhost/" + distro,
+		cwd:         linkDir,
+	}
+	res, err := s.ChangeRemoteDir("af")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(af) failed: %v", err)
+	}
+	if res.Dir != posixTarget || s.cwd != posixTarget {
+		t.Errorf("entering af: dir=%q cwd=%q, want %q", res.Dir, s.cwd, posixTarget)
+	}
+	res2, err := s.ChangeRemoteDir("sub")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(sub) failed: %v", err)
+	}
+	if want := posixTarget + "/sub"; res2.Dir != want {
+		t.Errorf("child dir = %q, want %q", res2.Dir, want)
+	}
+	found := false
+	for _, f := range res2.Files {
+		if f.Name == "inside.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("listing missing inside.txt: %+v", res2.Files)
+	}
+}
+
+// A cwd that still holds an unresolved link (restored cache / history from an
+// older session) must not poison child navigation or content reads: the share
+// cannot open any path crossing a link, mid-path included, so change-dir and
+// content ops heal the path via `readlink -f` before giving up.
+func TestWSLMidPathLinkHealing(t *testing.T) {
+	distro := wslTestDistro(t)
+	wsl := func(script string) {
+		t.Helper()
+		if out, err := exec.Command("wsl.exe", "-d", distro, "--", "sh", "-c", script).CombinedOutput(); err != nil {
+			t.Fatalf("wsl %q: %v: %s", script, err, out)
+		}
+	}
+	dir := fmt.Sprintf("/tmp/uniterm-symtest-%d", time.Now().UnixNano())
+	wsl(fmt.Sprintf("mkdir -p '%s/real/lib' && printf hi > '%s/real/lib/inside.txt' && printf yo > '%s/real/notes.txt' && ln -sfn real '%s/af'", dir, dir, dir, dir))
+	defer exec.Command("wsl.exe", "-d", distro, "--", "rm", "-rf", dir).Run()
+
+	s := &WSLFileSession{
+		baseSession: baseSession{sessionType: "wsl-file"},
+		distro:      distro,
+		root:        "//wsl.localhost/" + distro,
+		cwd:         dir + "/af", // the link path itself, as a stale cwd would be
+	}
+	// Content reads under the stale link path must heal the same way.
+	if b, err := s.GetContent("notes.txt"); err != nil || string(b) != "yo" {
+		t.Errorf("GetContent(notes.txt) = %q, %v; want %q", b, err, "yo")
+	}
+	res, err := s.ChangeRemoteDir("lib")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(lib) failed: %v", err)
+	}
+	if want := dir + "/real/lib"; res.Dir != want || s.cwd != want {
+		t.Errorf("healed dir=%q cwd=%q, want %q", res.Dir, s.cwd, want)
+	}
+	found := false
+	for _, f := range res.Files {
+		if f.Name == "inside.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("listing missing inside.txt: %+v", res.Files)
+	}
+}
+
 // The wsl.exe invocation that creates a symbolic link inside the distro (the
 // wsl.localhost UNC share cannot create Linux links).
 func TestWSLSymlinkCmd(t *testing.T) {
@@ -278,5 +432,242 @@ func TestWSLSymlinkCmd(t *testing.T) {
 	want := []string{"wsl.exe", "-d", "Ubuntu-22.04", "--", "ln", "-s", "/home/u/target", "/home/u/link"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Errorf("wslSymlinkCmd args = %v, want %v", cmd.Args, want)
+	}
+}
+
+// /mnt/<drive>/... paths are the local Windows drive reached through WSL, so
+// they map to the plain local path when the first segment is a single, existing
+// drive letter; anything else (non-drive mounts, missing drives) stays on the
+// 9P share path.
+func TestWSLMountLocalPath(t *testing.T) {
+	absent := ""
+	for _, letter := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+		if _, err := os.Stat(string(letter) + `:\`); err != nil {
+			absent = string(letter)
+			break
+		}
+	}
+	cases := []struct {
+		posix string
+		want  string
+		ok    bool
+	}{
+		{"/mnt/c", `C:\`, true},
+		{"/mnt/C", `C:\`, true},
+		{"/mnt/c/Users", `C:\Users`, true},
+		{"/mnt", "", false},
+		{"/mnt/wsl", "", false},
+		{"/mnt/cfoo", "", false},
+		{"/home/user", "", false},
+	}
+	if absent != "" {
+		cases = append(cases, struct {
+			posix string
+			want  string
+			ok    bool
+		}{"/mnt/" + strings.ToLower(absent), "", false})
+	}
+	for _, c := range cases {
+		got, ok := wslMountLocalPath(c.posix)
+		if ok != c.ok || got != c.want {
+			t.Errorf("wslMountLocalPath(%q) = %q, %v; want %q, %v", c.posix, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// ListRemote on /mnt itself is a synthesized view of the local drive letters
+// (the 9P share denies the mountpoint), so navigation / -> /mnt -> /mnt/c is
+// seamless.
+func TestWSLListMntRoot(t *testing.T) {
+	s := &WSLFileSession{distro: "Ubuntu"}
+	res, err := s.ListRemote("/mnt")
+	if err != nil {
+		t.Fatalf("ListRemote(/mnt) failed: %v", err)
+	}
+	if res.Dir != "/mnt" {
+		t.Errorf("Dir = %q, want /mnt", res.Dir)
+	}
+	want := map[string]bool{}
+	if drives, err := s.ListLocalDrives(); err == nil {
+		for _, d := range drives {
+			want[strings.ToLower(d.Name[:1])] = true
+		}
+	}
+	if len(want) == 0 {
+		t.Skip("no local drives found")
+	}
+	got := map[string]bool{}
+	for _, f := range res.Files {
+		if !f.IsDir {
+			t.Errorf("drive entry %q should be a directory: %+v", f.Name, f)
+		}
+		got[f.Name] = true
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("listing = %v, want %v", got, want)
+	}
+}
+
+// Entering /mnt/c lands on the local drive: the listing matches the real C:\
+// contents and the cwd is the POSIX mount path.
+func TestWSLChangeRemoteDirMnt(t *testing.T) {
+	if _, err := os.Stat(`C:\`); err != nil {
+		t.Skip("no C: drive")
+	}
+	s := &WSLFileSession{distro: "Ubuntu", root: "//wsl.localhost/Ubuntu"}
+	res, err := s.ChangeRemoteDir("/mnt/c")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(/mnt/c) failed: %v", err)
+	}
+	if res.Dir != "/mnt/c" {
+		t.Errorf("Dir = %q, want /mnt/c", res.Dir)
+	}
+	if s.cwd != "/mnt/c" {
+		t.Errorf("cwd = %q, want /mnt/c", s.cwd)
+	}
+	local, err := os.ReadDir(`C:\`)
+	if err != nil {
+		t.Fatalf("ReadDir(C:\\) failed: %v", err)
+	}
+	if len(res.Files) != len(local) {
+		t.Errorf("listing has %d entries, C:\\ has %d", len(res.Files), len(local))
+	}
+}
+
+// Content operations under /mnt/<drive> hit the real local file, so editing a
+// file seen in the WSL pane edits the Windows copy.
+func TestWSLContentMappedMnt(t *testing.T) {
+	tmp := os.TempDir()
+	vol := filepath.VolumeName(tmp)
+	if len(vol) != 2 || vol[1] != ':' {
+		t.Skipf("TempDir %q is not on a drive letter", tmp)
+	}
+	posix := "/mnt/" + strings.ToLower(vol[:1]) + filepath.ToSlash(tmp[2:]) + "/uniterm-mnt-test.txt"
+	local := filepath.Join(tmp, "uniterm-mnt-test.txt")
+	defer os.Remove(local)
+
+	if err := os.WriteFile(local, []byte("hi"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	s := &WSLFileSession{distro: "Ubuntu", root: "//wsl.localhost/Ubuntu"}
+	got, err := s.GetContent(posix)
+	if err != nil {
+		t.Fatalf("GetContent(%q) failed: %v", posix, err)
+	}
+	if string(got) != "hi" {
+		t.Errorf("GetContent = %q, want %q", got, "hi")
+	}
+	if err := s.PutContent(posix, []byte("bye")); err != nil {
+		t.Fatalf("PutContent failed: %v", err)
+	}
+	if b, err := os.ReadFile(local); err != nil || string(b) != "bye" {
+		t.Errorf("PutContent missed the local file: %q, %v", b, err)
+	}
+}
+
+// A download from /mnt/<drive> copies between two local paths and reports the
+// POSIX mount path as the task's remote path.
+func TestWSLGetMappedMnt(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "uniterm-mnt-dl-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+	vol := filepath.VolumeName(tmp)
+	if len(vol) != 2 || vol[1] != ':' {
+		t.Skipf("temp dir %q is not on a drive letter", tmp)
+	}
+	posix := "/mnt/" + strings.ToLower(vol[:1]) + filepath.ToSlash(tmp[2:])
+	src := filepath.Join(tmp, "in.txt")
+	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	s := &WSLFileSession{
+		baseSession: baseSession{sessionType: "wsl-file"},
+		distro:      "Ubuntu",
+		root:        "//wsl.localhost/Ubuntu",
+		localFSOps:  newLocalFSOps(),
+		transfers:   map[string]*TransferTask{},
+	}
+	dst := filepath.Join(tmp, "out.txt")
+	id, err := s.Get(posix+"/in.txt", dst, false)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	// The task deletes itself on completion; read it right away.
+	s.mu.Lock()
+	task := s.transfers[id]
+	s.mu.Unlock()
+	if task == nil || task.RemotePath != posix+"/in.txt" {
+		t.Errorf("task RemotePath = %q, want %q", taskRemotePath(task), posix+"/in.txt")
+	}
+	out := dst
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if b, rerr := os.ReadFile(out); rerr == nil {
+			if string(b) != "payload" {
+				t.Fatalf("copied content = %q, want %q", b, "payload")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("copy never produced %s", out)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func taskRemotePath(t *TransferTask) string {
+	if t == nil {
+		return ""
+	}
+	return t.RemotePath
+}
+
+// A symlink created inside the distro on a mounted drive is an LX reparse
+// point the Windows side cannot resolve, so the mapped-path Stat fails.
+// Entering it must fall back to `readlink -f` and continue at the link's real
+// target, matching the share-side symlink fallback.
+func TestWSLChangeRemoteDirMntSymlinkFallback(t *testing.T) {
+	distro := wslTestDistro(t)
+	tmp := os.TempDir()
+	vol := filepath.VolumeName(tmp)
+	if len(vol) != 2 || vol[1] != ':' {
+		t.Skipf("TempDir %q is not on a drive letter", tmp)
+	}
+	posixTmp := "/mnt/" + strings.ToLower(vol[:1]) + filepath.ToSlash(tmp[2:])
+	base := fmt.Sprintf("%s/uniterm-mnt-sym-%d", posixTmp, time.Now().UnixNano())
+	wsl := func(script string) {
+		t.Helper()
+		if out, err := exec.Command("wsl.exe", "-d", distro, "--", "sh", "-c", script).CombinedOutput(); err != nil {
+			t.Fatalf("wsl %q: %v: %s", script, err, out)
+		}
+	}
+	// Relative link target on purpose: readlink -f must canonicalize it.
+	wsl(fmt.Sprintf("mkdir -p '%s/real' && printf hi > '%s/real/inside.txt' && ln -s real '%s/dlink'", base, base, base))
+	defer os.RemoveAll(filepath.Join(tmp, filepath.Base(base)))
+
+	s := &WSLFileSession{
+		baseSession: baseSession{sessionType: "wsl-file"},
+		distro:      distro,
+		root:        "//wsl.localhost/" + distro,
+		cwd:         base,
+	}
+	res, err := s.ChangeRemoteDir("dlink")
+	if err != nil {
+		t.Fatalf("ChangeRemoteDir(dlink) failed: %v", err)
+	}
+	if want := base + "/real"; res.Dir != want {
+		t.Errorf("resolved dir = %q, want %q", res.Dir, want)
+	}
+	found := false
+	for _, f := range res.Files {
+		if f.Name == "inside.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("target listing missing inside.txt: %+v", res.Files)
 	}
 }
