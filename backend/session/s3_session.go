@@ -638,7 +638,6 @@ func (s *S3Session) Get(remotePath, localPath string, recursive bool) (string, e
 			err = s.downloadFile(task, rp, lp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -686,7 +685,6 @@ func (s *S3Session) Put(localPath, remotePath string, recursive bool) (string, e
 			err = s.uploadFile(task, lp, rp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -800,9 +798,9 @@ func calcLocalDirSize(localDir string) (int64, error) {
 
 func (s *S3Session) downloadDir(remoteDir, localDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := s.calcRemoteDirSize(remoteDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -862,14 +860,14 @@ func (s *S3Session) downloadDir(remoteDir, localDir string, task *TransferTask) 
 
 func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath string) error {
 	// Get file size first for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		details, err := s.s3.FileDetails(simples3.DetailsInput{
 			Bucket:    s.bucket,
 			ObjectKey: s.s3Key(remotePath),
 		})
 		if err == nil && details.ContentLength != "" {
 			if size, parseErr := strconv.ParseInt(details.ContentLength, 10, 64); parseErr == nil {
-				task.Total = size
+				task.setTotal(size)
 			}
 		}
 	}
@@ -900,7 +898,7 @@ func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath strin
 		n, e := rc.Read(buf)
 		if n > 0 {
 			dst.Write(buf[:n])
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {
@@ -914,9 +912,9 @@ func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath strin
 
 func (s *S3Session) uploadDir(localDir, remoteDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := calcLocalDirSize(localDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -987,9 +985,9 @@ func (s *S3Session) uploadFile(task *TransferTask, localPath, remotePath string)
 		Body:        bytes.NewReader(data),
 	})
 	if err == nil {
-		task.Progress += int64(len(data))
-		if task.Total == 0 {
-			task.Total = int64(len(data))
+		task.addProgress(int64(len(data)))
+		if task.loadTotal() == 0 {
+			task.setTotal(int64(len(data)))
 		}
 		s.emitTransferProgress(task)
 	}

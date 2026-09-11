@@ -852,7 +852,7 @@ func (s *SCPSession) scpFetchTree(remoteDir, localRoot string, task *TransferTas
 				return err
 			}
 			rerr := c.receiveFileBody(line, f, task, nil, func(n int64) {
-				task.Progress += n
+				task.addProgress(n)
 				s.emitTransferProgress(task)
 			})
 			f.Close()
@@ -987,7 +987,7 @@ func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir string, task *Tra
 			}
 		} else {
 			if err := c.sendFileBody(local, entry.Name(), task, func(n int64) {
-				task.Progress += n
+				task.addProgress(n)
 				s.emitTransferProgress(task)
 			}); err != nil {
 				return err
@@ -1089,7 +1089,6 @@ func (s *SCPSession) Get(remotePath, localPath string, recursive bool) (string, 
 				s.mu.Unlock()
 			}()
 			if err := s.scpFetchTree(rp, lp, task); err != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, err)
 				return
 			}
@@ -1150,7 +1149,6 @@ func (s *SCPSession) Put(localPath, remotePath string, recursive bool) (string, 
 				s.mu.Unlock()
 			}()
 			if err := s.scpSendTree(lp, rp, task); err != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, err)
 				return
 			}
@@ -1200,27 +1198,25 @@ func (s *SCPSession) startTransfer(task *TransferTask) {
 		if task.Type == "download" {
 			localFile, e := os.Create(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
 			defer localFile.Close()
 			err = s.scpFetchFile(task.RemotePath, localFile, task,
-				func(size int64) { task.Total = size },
+				func(size int64) { task.setTotal(size) },
 				func(n int64) {
-					task.Progress += n
+					task.addProgress(n)
 					s.emitTransferProgress(task)
 				})
 		} else {
 			fi, e := os.Stat(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
-			task.Total = fi.Size()
+			task.setTotal(fi.Size())
 			err = s.scpSendFile(task.LocalPath, task.RemotePath, task, func(n int64) {
-				task.Progress += n
+				task.addProgress(n)
 				s.emitTransferProgress(task)
 			})
 		}
@@ -1230,7 +1226,6 @@ func (s *SCPSession) startTransfer(task *TransferTask) {
 				s.emitTransferComplete(task)
 				return
 			}
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}

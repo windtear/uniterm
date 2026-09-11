@@ -44,7 +44,7 @@ func (s *baseSession) emitTransferPayload(payload map[string]any) {
 func (s *baseSession) emitTransferStart(task *TransferTask) {
 	s.emitTransferPayload(map[string]any{
 		"taskId": task.ID, "event": "start", "tfType": task.Type,
-		"name": transferDisplayName(task), "total": task.Total,
+		"name": transferDisplayName(task), "total": task.loadTotal(),
 		"localPath": task.LocalPath, "remotePath": task.RemotePath,
 	})
 }
@@ -66,7 +66,7 @@ func (s *baseSession) emitTransferProgress(task *TransferTask) {
 func (s *baseSession) emitTransferProgressForced(task *TransferTask) {
 	s.emitTransferPayload(map[string]any{
 		"taskId": task.ID, "event": "progress",
-		"progress": task.Progress, "total": task.Total,
+		"progress": task.loadProgress(), "total": task.loadTotal(),
 	})
 }
 

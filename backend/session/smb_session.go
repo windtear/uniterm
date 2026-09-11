@@ -483,7 +483,6 @@ func (s *SMBSession) Get(remotePath, localPath string, recursive bool) (string, 
 			err = s.downloadFile(task, rp, lp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -532,7 +531,6 @@ func (s *SMBSession) Put(localPath, remotePath string, recursive bool) (string, 
 			err = s.uploadFile(task, lp, rp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -606,9 +604,9 @@ func (s *SMBSession) calcSmbRemoteDirSize(remoteDir string) (int64, error) {
 
 func (s *SMBSession) downloadDir(remoteDir, localDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := s.calcSmbRemoteDirSize(remoteDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -642,10 +640,10 @@ func (s *SMBSession) downloadDir(remoteDir, localDir string, task *TransferTask)
 
 func (s *SMBSession) downloadFile(task *TransferTask, remotePath, localPath string) error {
 	// Get file size first for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if fi, err := s.share.Stat(remotePath); err == nil {
 			if fi.Size() > 0 {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 		}
 	}
@@ -671,7 +669,7 @@ func (s *SMBSession) downloadFile(task *TransferTask, remotePath, localPath stri
 		n, e := f.Read(buf)
 		if n > 0 {
 			dst.Write(buf[:n])
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {
@@ -685,9 +683,9 @@ func (s *SMBSession) downloadFile(task *TransferTask, remotePath, localPath stri
 
 func (s *SMBSession) uploadDir(localDir, remoteDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := calcLocalDirSize(localDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -721,10 +719,10 @@ func (s *SMBSession) uploadDir(localDir, remoteDir string, task *TransferTask) e
 
 func (s *SMBSession) uploadFile(task *TransferTask, localPath, remotePath string) error {
 	// Get local file size first for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if fi, err := os.Stat(localPath); err == nil {
 			if fi.Size() > 0 {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 		}
 	}
@@ -752,7 +750,7 @@ func (s *SMBSession) uploadFile(task *TransferTask, localPath, remotePath string
 			if _, we := dst.Write(buf[:n]); we != nil {
 				return we
 			}
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {

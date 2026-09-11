@@ -339,7 +339,6 @@ func (s *FTPSession) Get(remotePath, localPath string, recursive bool) (string, 
 				s.mu.Unlock()
 			}()
 			if err := s.downloadDir(rp, lp, task); err != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, err)
 				return
 			}
@@ -397,7 +396,6 @@ func (s *FTPSession) Put(localPath, remotePath string, recursive bool) (string, 
 				s.mu.Unlock()
 			}()
 			if err := s.uploadDir(lp, rp, task); err != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, err)
 				return
 			}
@@ -651,7 +649,6 @@ func (s *FTPSession) startTransfer(task *TransferTask) {
 		if task.Type == "download" {
 			resp, e := s.conn.Retr(task.RemotePath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
@@ -659,12 +656,11 @@ func (s *FTPSession) startTransfer(task *TransferTask) {
 
 			fi, e := s.conn.FileSize(task.RemotePath)
 			if e == nil && fi > 0 {
-				task.Total = fi
+				task.setTotal(fi)
 			}
 
 			localFile, e := os.Create(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
@@ -674,7 +670,6 @@ func (s *FTPSession) startTransfer(task *TransferTask) {
 		} else {
 			localFile, e := os.Open(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
@@ -682,14 +677,13 @@ func (s *FTPSession) startTransfer(task *TransferTask) {
 
 			fi, _ := localFile.Stat()
 			if fi != nil {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 
 			err = s.conn.Stor(task.RemotePath, &progressReader{r: localFile, task: task, s: s})
 		}
 
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -708,7 +702,7 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	pr.task.waitIfPaused()
 	n, err := pr.r.Read(p)
 	if n > 0 {
-		pr.task.Progress += int64(n)
+		pr.task.addProgress(int64(n))
 		pr.s.emitTransferProgress(pr.task)
 	}
 	return n, err
@@ -797,7 +791,7 @@ func (s *FTPSession) transferFile(task *TransferTask, localPath, remotePath, tfT
 			n, e := resp.Read(buf)
 			if n > 0 {
 				dst.Write(buf[:n])
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 				s.emitTransferProgress(task)
 			}
 			if e != nil {
@@ -831,7 +825,7 @@ func (s *FTPSession) transferFile(task *TransferTask, localPath, remotePath, tfT
 					pw.Close()
 					return we
 				}
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 				s.emitTransferProgress(task)
 			}
 			if e != nil {

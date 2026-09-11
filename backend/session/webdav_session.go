@@ -299,7 +299,6 @@ func (s *WebDAVSession) Get(remotePath, localPath string, recursive bool) (strin
 			err = s.downloadFile(task, rp, lp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -347,7 +346,6 @@ func (s *WebDAVSession) Put(localPath, remotePath string, recursive bool) (strin
 			err = s.uploadFile(task, lp, rp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -421,9 +419,9 @@ func (s *WebDAVSession) calcWebdavRemoteDirSize(remoteDir string) (int64, error)
 
 func (s *WebDAVSession) downloadDir(remoteDir, localDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := s.calcWebdavRemoteDirSize(remoteDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 	if err := os.MkdirAll(localDir, 0755); err != nil {
@@ -456,10 +454,10 @@ func (s *WebDAVSession) downloadDir(remoteDir, localDir string, task *TransferTa
 
 func (s *WebDAVSession) downloadFile(task *TransferTask, remotePath, localPath string) error {
 	// Get file size first for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if fi, err := s.client.Stat(remotePath); err == nil {
 			if fi.Size() > 0 {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 		}
 	}
@@ -485,7 +483,7 @@ func (s *WebDAVSession) downloadFile(task *TransferTask, remotePath, localPath s
 		n, e := rc.Read(buf)
 		if n > 0 {
 			dst.Write(buf[:n])
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {
@@ -499,9 +497,9 @@ func (s *WebDAVSession) downloadFile(task *TransferTask, remotePath, localPath s
 
 func (s *WebDAVSession) uploadDir(localDir, remoteDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := calcLocalDirSize(localDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -544,8 +542,8 @@ func (s *WebDAVSession) uploadFile(task *TransferTask, localPath, remotePath str
 		return err
 	}
 	// Set total size from file stat for progress tracking
-	if task.Total <= 0 && fi.Size() > 0 {
-		task.Total = fi.Size()
+	if task.loadTotal() <= 0 && fi.Size() > 0 {
+		task.setTotal(fi.Size())
 	}
 	pr, pw := io.Pipe()
 	errCh := make(chan error, 1)
@@ -569,7 +567,7 @@ func (s *WebDAVSession) uploadFile(task *TransferTask, localPath, remotePath str
 				return we
 			}
 			totalWritten += int64(n)
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {

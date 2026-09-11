@@ -566,11 +566,10 @@ func (s *WSLFileSession) startLocalTransfer(tfType, local, remote string) (strin
 			s.mu.Unlock()
 		}()
 		if err := copyPath(src, dst, task); err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
-		task.Progress = task.Total
+		task.setProgress(task.loadTotal())
 		task.Status = "done"
 		s.emitTransferProgress(task)
 		s.emitTransferComplete(task)
@@ -659,7 +658,7 @@ func copyFile(src, dst string, task *TransferTask) error {
 				return werr
 			}
 			if task != nil {
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 			}
 		}
 		if rerr == io.EOF {
