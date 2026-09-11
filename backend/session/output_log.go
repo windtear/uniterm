@@ -18,6 +18,7 @@ import (
 // Sequences handled:
 //   - CSI: ESC '[' ... final byte (0x40-0x7E)
 //   - OSC: ESC ']' ... (BEL 0x07 or ESC '\')
+//   - SCS: ESC '(' / ')' / '*' / '+' / '-' / '.' / '/' + designator
 //   - SS2/SS3: ESC 'N' single-char / ESC 'O' single-char
 //   - Single-char ESC: ESC + one letter
 //   - BEL (0x07) outside OSC context is dropped
@@ -119,6 +120,14 @@ func scanEscape(data []byte, start int) (int, bool) {
 		}
 		return start, false
 	case 'N', 'O': // SS2/SS3: ESC N x / ESC O x — one char follows
+		if start+2 >= len(data) {
+			return start, false
+		}
+		return start + 3, true
+	case '(', ')', '*', '+', '-', '.', '/': // SCS: designate a character set
+		// The byte after the introducer is the character-set designator.
+		// fish commonly emits ESC ( B and ESC ) B; consuming only ESC and
+		// the introducer would leak the final B into printable session logs.
 		if start+2 >= len(data) {
 			return start, false
 		}
