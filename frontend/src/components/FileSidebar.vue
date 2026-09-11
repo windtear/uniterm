@@ -63,6 +63,7 @@
           @cancel-load="onCancelLoad"
           @save-bookmark="onSaveBookmark"
           @remove-bookmark="onRemoveBookmark"
+          @copy-path-to-terminal="onCopyPathToTerminal"
         />
       </div>
 
@@ -157,6 +158,7 @@ import FileGenericDialog from './FileGenericDialog.vue'
 import FileConflictDialog from './FileConflictDialog.vue'
 import { Events } from '@wailsio/runtime'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
+import { queuedSessionWrite } from '../services/sessionWriter'
 
 const { t } = useI18n()
 bindExtEditUploadedToast()
@@ -270,6 +272,18 @@ function openStandaloneSftp() {
   if (!panel) return
   const ev = companionStore.isWslPanel(pid) ? 'app:connect-wsl-file' : 'app:connect-sftp'
   window.dispatchEvent(new CustomEvent(ev, { detail: panel }))
+}
+
+// "Copy path to terminal" (FileList context menu): the clipboard write already
+// happened in FileList. Additionally, type the path at the prompt of the
+// terminal panel that owns this sidebar — the SSH (or WSL) panel tracked by the
+// companion store, whose panel session IS the terminal. Without one, no-op.
+function onCopyPathToTerminal(text: string) {
+  const pid = companionStore.activeFilesPanelId
+  const sid = pid ? panelStore.getPanel(pid)?.sessionId : null
+  if (!sid) return
+  // Path only — no trailing newline, so the user can complete the command.
+  queuedSessionWrite(sid, text)
 }
 
 // ── Change-permission dialog (shared FileChmodDialog) ──

@@ -28,6 +28,23 @@
       <button v-if="mode === 'remote'" class="filter-icon-btn" @click="emit('upload')" :title="t('sftp.upload')">
         <el-icon><Upload :size="14" /></el-icon>
       </button>
+      <!-- Flat toolbar (toolbarLayout="flat"): the more-menu's create actions are
+           also surfaced as icon buttons, plus a selection-driven download. -->
+      <button
+        v-if="mode === 'remote' && flatToolbar"
+        class="filter-icon-btn"
+        :disabled="selectionStats.count === 0"
+        @click="emit('downloadTo', [...selectedItems])"
+        :title="t('sftp.downloadTo')"
+      >
+        <el-icon><Download :size="14" /></el-icon>
+      </button>
+      <button v-if="flatToolbar" class="filter-icon-btn" @click="doNewFile" :title="t('sftp.newFile')">
+        <el-icon><FilePlus2 :size="14" /></el-icon>
+      </button>
+      <button v-if="flatToolbar" class="filter-icon-btn" @click="doMkdir" :title="t('sftp.newDirectory')">
+        <el-icon><FolderPlus :size="14" /></el-icon>
+      </button>
       <button class="filter-icon-btn" @click.stop="moreMenuRef?.toggle($event.currentTarget as HTMLElement)" :title="t('sftp.more')">
         <el-icon><MoreHorizontal :size="14" /></el-icon>
       </button>
@@ -133,6 +150,8 @@
           <MenuItem :class="{ disabled: !clipboardCount }" @click="clipboardCount && doPaste()">{{ t('sftp.paste') }}</MenuItem>
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
+          <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
+          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doRename">{{ t('sftp.rename') }}</MenuItem>
@@ -149,6 +168,8 @@
           <MenuItem :class="{ disabled: !clipboardCount }" @click="clipboardCount && doPaste()">{{ t('sftp.paste') }}</MenuItem>
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
+          <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
+          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doRename">{{ t('sftp.rename') }}</MenuItem>
@@ -161,6 +182,8 @@
           <MenuItem :class="{ disabled: !clipboardCount }" @click="clipboardCount && doPaste()">{{ t('sftp.paste') }}</MenuItem>
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
+          <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
+          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem v-if="mode === 'remote'" class="disabled">{{ t('sftp.renameDisabled') }}</MenuItem>
@@ -192,8 +215,10 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Folder, File, Link, RefreshCw, Eye, Upload, MoreHorizontal, ChevronLeft, ChevronRight, CornerLeftUp } from '@lucide/vue'
+import { Folder, File, Link, RefreshCw, Eye, Upload, Download, FilePlus2, FolderPlus, MoreHorizontal, ChevronLeft, ChevronRight, CornerLeftUp } from '@lucide/vue'
 import { useI18n } from '../i18n'
+import { msg } from '../services/message'
+import { joinPath } from '../composables/useFilePanel'
 import PathBreadcrumb from './PathBreadcrumb.vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
@@ -230,6 +255,10 @@ const props = defineProps<{
    *  forward buttons are disabled when omitted (hosts without history). */
   canBack?: boolean
   canForward?: boolean
+  /** Toolbar form: 'flat' also shows the create actions (and a selection-driven
+   *  download) as icon buttons in the filter bar; 'compact' (default) keeps them
+   *  in the more-menu only. */
+  toolbarLayout?: 'flat' | 'compact'
 }>()
 
 const emit = defineEmits<{
@@ -258,6 +287,7 @@ const emit = defineEmits<{
   back: []
   forward: []
   up: []
+  copyPathToTerminal: [text: string]
 }>()
 
 const { t, locale } = useI18n()
@@ -284,6 +314,7 @@ const tableRef = ref<any>(null)
 
 const targetSide = computed(() => props.mode === 'local' ? t('sftp.remote') : t('sftp.local'))
 const sendToKey = computed(() => props.mode === 'local' ? 'sftp.sendToRemote' : 'sftp.sendToLocal')
+const flatToolbar = computed(() => props.toolbarLayout === 'flat')
 
 // Footer stats for the current multi-selection. The '..' parent row is not a
 // real entry, so it never counts toward the item total or the size sum.
@@ -582,6 +613,34 @@ function onEmptyAreaContextMenu(event: MouseEvent, force = false) {
 
 function doSendToOther() { emit('sendToOther', [...selectedItems.value]); ctxMenuVisible.value = false }
 function doDownloadTo() { emit('downloadTo', [...selectedItems.value]); ctxMenuVisible.value = false }
+
+// "Copy path" actions: one full path per selected entry ('..' excluded),
+// joined by newlines so a multi-selection pastes as a path list.
+function buildSelectedPathsText(): string {
+  const items = selectedItems.value.filter(i => i.name !== '..')
+  if (!items.length) return ''
+  const base = props.breadcrumbPath || ''
+  return items.map(i => base ? joinPath(base, i.name) : i.name).join('\n')
+}
+
+async function doCopyPath() {
+  ctxMenuVisible.value = false
+  const text = buildSelectedPathsText()
+  if (!text) return
+  await navigator.clipboard.writeText(text).catch(() => {})
+  msg.success(t('sftp.pathCopied'))
+}
+
+async function doCopyPathToTerminal() {
+  ctxMenuVisible.value = false
+  const text = buildSelectedPathsText()
+  if (!text) return
+  await navigator.clipboard.writeText(text).catch(() => {})
+  // The host types the text at its terminal's prompt (no trailing newline);
+  // silently no-ops when no terminal panel exists for this session.
+  emit('copyPathToTerminal', text)
+}
+
 function doRename() { emit('rename', selectedItems.value[0]); ctxMenuVisible.value = false }
 function doDelete() { emit('delete', [...selectedItems.value]); ctxMenuVisible.value = false }
 function doChmod() { emit('chmod', selectedItems.value[0]); ctxMenuVisible.value = false }
