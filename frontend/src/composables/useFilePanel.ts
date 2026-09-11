@@ -6,12 +6,14 @@ import {
   SftpPut, SftpGet, SftpChmod, SftpSymlink,
   SftpLocalCopy, SftpLocalMove, SftpLocalRename, SftpLocalRemove, SftpLocalMkdir, SftpLocalPutContent,
   SftpCancelTransfer, SftpPauseTransfer, SftpResumeTransfer,
+  SftpRetryTransfer, SftpDismissTransfer,
   OpenMultipleFilesDialog, OpenDirectoryDialog,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { Events } from '@wailsio/runtime'
 import { useLocalStateStore } from '../stores/localStateStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { t as i18nT } from '../i18n'
+import { buildSkipList } from './useTransferTasks'
 import type { TransferTaskUI } from '../stores/panelStore'
 
 // --- Global external-edit toast ---------------------------------------------
@@ -212,6 +214,66 @@ export const localFileOps: FilePanelOps = {
   put: SftpPut,
   get: SftpGet,
   chmod: SftpChmod,
+}
+
+// --- Unified "send to the other pane" ---------------------------------------
+
+/** Creates the shared "send these items to the other pane" handler used by
+ *  both the context-menu action and the cross-pane drag-drop. Filters '..',
+ *  prompts once per batch for name conflicts, auto-renames on 'rename' (with
+ *  a growing existing-names list), then fires each transfer without awaiting
+ *  it — completion refreshes go through the transferEvents onDone hook.
+ *
+ *  Role of the cwds: the source pane provides the files (its cwd builds the
+ *  remote/source path with the item's original name), the target pane
+ *  receives them (its cwd builds the destination path with the resolved
+ *  name). 'toRemote' uploads local → remote, 'toLocal' downloads remote →
+ *  local. */
+export function createSendToOther(opts: {
+  sid: () => string | undefined
+  direction: 'toRemote' | 'toLocal'
+  sourceCwd: { value: string }
+  targetCwd: { value: string }
+  targetFiles: { value: FileItem[] }
+  conflicts: ConflictDialog
+  ops: FilePanelOps
+}): (items: FileItem[]) => Promise<void> {
+  return async (items: FileItem[]) => {
+    const id = opts.sid()
+    if (!id) return
+
+    const fileNames = items.filter(i => i.name !== '..').map(i => i.name)
+    const action = await opts.conflicts.resolveConflicts(
+      fileNames,
+      opts.targetFiles.value.map(f => f.name),
+    )
+    if (action === 'cancel') return
+
+    const existingNames = opts.targetFiles.value.map(f => f.name)
+    for (const item of items) {
+      if (item.name === '..') continue
+      let resolvedName = item.name
+      if (action === 'rename' && existingNames.includes(item.name)) {
+        resolvedName = autoRename(item.name, existingNames)
+      }
+      existingNames.push(resolvedName)
+      if (opts.direction === 'toRemote') {
+        opts.ops.put(
+          id,
+          joinPath(opts.sourceCwd.value, item.name),
+          opts.targetCwd.value + '/' + resolvedName,
+          item.isDir,
+        )
+      } else {
+        opts.ops.get(
+          id,
+          joinPath(opts.sourceCwd.value, item.name),
+          joinPath(opts.targetCwd.value, resolvedName).replace(/\\/g, '/'),
+          item.isDir,
+        )
+      }
+    }
+  }
 }
 
 // --- The panel composable ---------------------------------------------------
@@ -593,11 +655,41 @@ export function useFilePanel(opts: FilePanelOptions) {
     try { await SftpResumeTransfer(id, taskId) } catch (e) { console.error('resume transfer:', e) }
   }
 
+  // Re-runs a failed transfer. The task stores the original full paths from the
+  // backend's start payload; completed files (per the per-file tracker) are
+  // skipped on the backend via the skip list.
+  async function onRetryTransfer(task: TransferTaskUI) {
+    const id = sid()
+    if (!id) return
+    const spec = {
+      type: task.type,
+      localPath: task.localPath,
+      remotePath: task.remotePath,
+      // Directory tasks carry per-file state; single files retry as-is.
+      recursive: task.fileCount > 0,
+    }
+    try {
+      await SftpRetryTransfer(id, spec, buildSkipList(task))
+    } catch (e) {
+      console.error('retry transfer:', e)
+    }
+  }
+
+  /** Drops a retained (failed) task from the backend's transfer registry. */
+  function onDismissTask(taskId: string) {
+    const id = sid()
+    if (!id) return
+    SftpDismissTransfer(id, taskId).catch(() => {})
+  }
+
   function clearFinishedTransfers() {
     const tasks = transferTasks()
     for (let i = tasks.length - 1; i >= 0; i--) {
       const st = tasks[i].status
       if (st === 'done' || st === 'error' || st === 'cancelled') {
+        // The backend only retains failed tasks; tell it to drop each one
+        // before the UI forgets the task id.
+        if (st === 'error') onDismissTask(tasks[i].id)
         tasks.splice(i, 1)
       }
     }
@@ -643,7 +735,8 @@ export function useFilePanel(opts: FilePanelOptions) {
     onUpload, onDownloadTo,
     onEditFile, onEditExternal,
     // transfer panel
-    onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,
+    onCancelTransfer, onPauseTransfer, onResumeTransfer,
+    onRetryTransfer, onDismissTask, clearFinishedTransfers,
     // bookmarks
     onSaveBookmark, onRemoveBookmark,
     // drag-drop upload
@@ -694,59 +787,95 @@ export function useFileListing(opts: {
   const loading = ref(false)
   let version = 0
 
-  async function onRefresh(dir = cwd.value) {
+  // --- Navigation history (per-pane) ---
+  // Stack of absolute directories plus the current position. Every successful
+  // navigation/refresh whose directory differs from the current position
+  // truncates everything after it and appends (no consecutive duplicates);
+  // back/forward only move the index, so they never duplicate entries.
+  const dirStack = ref<string[]>([])
+  const dirIndex = ref(-1)
+  const canBack = computed(() => dirIndex.value > 0)
+  const canForward = computed(() =>
+    dirIndex.value >= 0 && dirIndex.value < dirStack.value.length - 1)
+
+  function recordHistory(dir: string) {
+    if (dirStack.value[dirIndex.value] === dir) return
+    dirStack.value = [...dirStack.value.slice(0, dirIndex.value + 1), dir]
+    dirIndex.value = dirStack.value.length - 1
+  }
+
+  /** Shared load core of onRefresh/onNavigate. `dir` is the list/change target,
+   *  `cwdFallback` keeps the old cwd when the backend returns no directory, and
+   *  `push` records the result in the history stack. Returns true only when
+   *  this call's own result was applied (not superseded, no failure). */
+  async function loadDir(
+    kind: 'list' | 'change',
+    dir: string,
+    cwdFallback: string,
+    push: boolean,
+  ): Promise<boolean> {
     const id = opts.sid()
-    if (!id) return
+    if (!id) return false
     const v = ++version
     loading.value = true
     try {
-      const run = opts.list(id, dir || '')
-      const result = opts.listTimeoutMs
+      const run = kind === 'list' ? opts.list(id, dir || '') : opts.changeDir(id, dir)
+      const result = kind === 'list' && opts.listTimeoutMs
         ? await withTimeout(run, opts.listTimeoutMs, 'list')
         : await run
-      if (v !== version) return
+      if (v !== version) return false
       files.value = result.files || []
-      cwd.value = result.dir || cwd.value
-      opts.onListSuccess?.()
+      cwd.value = result.dir || cwdFallback
+      if (push) recordHistory(result.dir || cwdFallback)
+      if (kind === 'list') opts.onListSuccess?.()
       await opts.afterList?.(result.dir)
+      return true
     } catch (e: any) {
-      if (v !== version) return
+      if (v !== version) return false
       const err = e?.toString?.() || String(e)
-      if (await opts.onListError?.(err)) return
+      if (await opts.onListError?.(err)) return false
       msg.error(err)
+      return false
     } finally {
       if (v === version) loading.value = false
     }
   }
 
+  async function onRefresh(dir = cwd.value) {
+    await loadDir('list', dir, cwd.value, true)
+  }
+
   async function onNavigate(path: string) {
-    const id = opts.sid()
-    if (!id) return
     const target = opts.resolveTarget(cwd.value, path)
-    const v = ++version
-    loading.value = true
-    try {
-      const result = await opts.changeDir(id, target)
-      if (v !== version) return
-      files.value = result.files || []
-      cwd.value = result.dir || target
-      await opts.afterList?.(result.dir)
-    } catch (e: any) {
-      if (v !== version) return
-      const err = e?.toString?.() || String(e)
-      if (await opts.onListError?.(err)) return
-      msg.error(err)
-    } finally {
-      if (v === version) loading.value = false
+    await loadDir('change', target, target, true)
+  }
+
+  /** Moves through the history stack and lists the stored absolute directory
+   *  via the same change-dir binding a normal navigation uses — without
+   *  pushing history, so back-then-forward never duplicates entries. The index
+   *  only advances when the load succeeds, so failures leave history intact. */
+  async function goHistory(delta: number) {
+    const idx = dirIndex.value + delta
+    if (idx < 0 || idx >= dirStack.value.length) return
+    const dir = dirStack.value[idx]
+    if (await loadDir('change', dir, dir, false)) {
+      dirIndex.value = idx
     }
   }
+
+  const onBack = () => goHistory(-1)
+  const onForward = () => goHistory(1)
+  const onUp = () => onNavigate('..')
 
   function onCancelLoad() {
     version++
     loading.value = false
   }
 
-  return { cwd, files, loading, onRefresh, onNavigate, onCancelLoad }
+  return {
+    cwd, files, loading, onRefresh, onNavigate, onCancelLoad,
+    canBack, canForward, onBack, onForward, onUp,
+  }
 }
 
 // --- Change-permission dialog ------------------------------------------------

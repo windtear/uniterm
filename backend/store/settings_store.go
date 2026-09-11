@@ -142,18 +142,23 @@ type KeyBinding struct {
 }
 
 type AppSettings struct {
-	Theme                string                `json:"theme"`
-	Language             string                `json:"language"`
-	Terminal             TerminalSettings      `json:"terminal"`
-	AI                   AISettings            `json:"ai"`
-	Keyboard             map[string]KeyBinding `json:"keyboard"`
-	AutoCheckUpdate      *bool                 `json:"autoCheckUpdate"`
-	CloseTabPrompt       *bool                 `json:"closeTabPrompt"`
-	CloseAppPrompt       *bool                 `json:"closeAppPrompt"`
-	SFTPBookmarks        SFTPBookmarks         `json:"sftpBookmarks"`
-	CustomTerminalThemes []CustomTerminalTheme `json:"customTerminalThemes"`
-	DefaultLocalShell    string                `json:"defaultLocalShell"`
-	TabCloseButton       string                `json:"tabCloseButton"`
+	Theme           string                `json:"theme"`
+	Language        string                `json:"language"`
+	Terminal        TerminalSettings      `json:"terminal"`
+	AI              AISettings            `json:"ai"`
+	Keyboard        map[string]KeyBinding `json:"keyboard"`
+	AutoCheckUpdate *bool                 `json:"autoCheckUpdate"`
+	CloseTabPrompt  *bool                 `json:"closeTabPrompt"`
+	CloseAppPrompt  *bool                 `json:"closeAppPrompt"`
+	SFTPBookmarks   SFTPBookmarks         `json:"sftpBookmarks"`
+	// SftpTransferPanelVisible remembers whether the SFTP transfer panel was
+	// last left visible. Pointer + omitempty so settings.json written by older
+	// builds (which lack this field) still load; nil means "use the frontend
+	// default" (hidden).
+	SftpTransferPanelVisible *bool                 `json:"sftpTransferPanelVisible,omitempty"`
+	CustomTerminalThemes     []CustomTerminalTheme `json:"customTerminalThemes"`
+	DefaultLocalShell        string                `json:"defaultLocalShell"`
+	TabCloseButton           string                `json:"tabCloseButton"`
 	// SidebarTabs toggles which connection-sidebar tab icons are visible,
 	// keyed by view id (connections/files/monitor/tunnels/quickCommands/
 	// history/personalization). "connections" is always shown in the UI and

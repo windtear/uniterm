@@ -22,6 +22,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
+
+	"github.com/ys-ll/uniterm/backend/log"
 )
 
 const cpUTF8 = 65001
@@ -124,6 +126,10 @@ type LocalSession struct {
 	disconnectOnce       sync.Once
 	mouseTrackingEnabled atomic.Bool
 
+	// osc7 extracts injected OSC-7 cwd reports from the raw ConPTY/pipe
+	// output stream (see shell_integration.go). Only used from readLoop.
+	osc7 osc7Scanner
+
 	mu             sync.RWMutex
 	enc            encoding.Encoding
 	decoder        *encoding.Decoder
@@ -186,8 +192,16 @@ func (s *LocalSession) Connect(config ConnectionConfig) error {
 			s.setStatus(StatusError)
 			return fmt.Errorf("empty WSL distribution name")
 		}
-		commandLine = wslCommandLine(distro)
-		cmd = exec.Command("wsl.exe", "-d", distro)
+		// Shell integration: probe the distro's shell and inject an OSC-7
+		// cwd hook. Any failure or timeout degrades silently to a plain
+		// `wsl.exe -d <distro>` — integration must never fail the session.
+		if startArgs, ok := wslShellIntegration(distro); ok {
+			commandLine = "wsl.exe -d " + distro + " " + strings.Join(startArgs, " ")
+			cmd = exec.Command("wsl.exe", append([]string{"-d", distro}, startArgs...)...)
+		} else {
+			commandLine = wslCommandLine(distro)
+			cmd = exec.Command("wsl.exe", "-d", distro)
+		}
 		cmd.Env = os.Environ()
 	} else {
 		commandLine = buildCommandLine(shell)
@@ -306,6 +320,129 @@ func parseWSLPath(path string) (distro string, ok bool) {
 		return "", false
 	}
 	return path[len(prefix):], true
+}
+
+// wslIntegrationTimeout bounds every wsl.exe one-shot call of the WSL shell
+// integration (shell detection, temp file/dir writes). WSL cold starts can
+// take a few seconds per call; any timeout or error silently degrades to a
+// plain `wsl.exe -d <distro>`.
+const wslIntegrationTimeout = 10 * time.Second
+
+// wslShellIntegration probes the distro's default shell and builds the
+// wsl.exe start arguments that launch it with an OSC-7 cwd hook injected.
+// The bootstrap is written INSIDE the distro (mktemp under /tmp), so nothing
+// is ever added to the user's ~/.bashrc / ~/.zshrc. Any failure returns
+// ok=false and the session silently starts a plain shell.
+//
+// Only bash and zsh are wired: fish's -C command contains spaces and quotes
+// that cannot be embedded safely in a ConPTY command line, so it degrades to
+// a plain shell here (SSH fish sessions still get integration).
+func wslShellIntegration(distro string) (startArgs []string, ok bool) {
+	shell, err := wslRunCommand(distro, "echo $SHELL", "", wslIntegrationTimeout)
+	if err != nil {
+		log.Writef("wsl: shell integration skipped for %s (detect shell: %v)", distro, err)
+		return nil, false
+	}
+	shell = strings.TrimSpace(shell)
+	files, _, ok := buildShellBootstrap(shell)
+	if !ok {
+		return nil, false
+	}
+	switch shellBasename(shell) {
+	case "bash":
+		content, ok := files["rcfile"]
+		if !ok {
+			return nil, false
+		}
+		path, err := wslWriteFile(distro, content)
+		if err != nil {
+			log.Writef("wsl: shell integration skipped for %s (write rcfile: %v)", distro, err)
+			return nil, false
+		}
+		startArgs = []string{"-e", "bash", "--rcfile", path}
+	case "zsh":
+		dir, err := wslMakeDir(distro)
+		if err != nil {
+			log.Writef("wsl: shell integration skipped for %s (make dir: %v)", distro, err)
+			return nil, false
+		}
+		for _, name := range []string{".zshrc", ".zshenv"} {
+			content, ok := files[name]
+			if !ok {
+				return nil, false
+			}
+			if err := wslWritePath(distro, dir+"/"+name, content); err != nil {
+				log.Writef("wsl: shell integration skipped for %s (write %s: %v)", distro, name, err)
+				return nil, false
+			}
+		}
+		startArgs = []string{"-e", "env", "ZDOTDIR=" + dir, "zsh"}
+	default:
+		return nil, false
+	}
+	// Every argument lands in a ConPTY command line; mktemp paths have no
+	// spaces, but assert anyway and bail rather than build a broken one.
+	for _, a := range startArgs {
+		if strings.ContainsAny(a, " \t\"") {
+			log.Writef("wsl: shell integration skipped for %s (unsafe start arg %q)", distro, a)
+			return nil, false
+		}
+	}
+	log.Writef("wsl: shell integration injected for %s (shell %s, args %v)", distro, shell, startArgs)
+	return startArgs, true
+}
+
+// wslRunCommand runs a one-shot command inside the distro via wsl.exe -e
+// with a timeout, optionally feeding stdin, and returns stdout.
+func wslRunCommand(distro, command, stdin string, timeout time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "wsl.exe", "-d", distro, "-e", "sh", "-c", command)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// wslWriteFile materializes content in a temp file inside the distro
+// (created via mktemp so the path is space-free) and returns the path.
+func wslWriteFile(distro, content string) (string, error) {
+	out, err := wslRunCommand(distro,
+		`f=$(mktemp /tmp/uniterm-XXXXXX); cat > "$f"; printf '%s' "$f"`,
+		content, wslIntegrationTimeout)
+	if err != nil {
+		return "", err
+	}
+	return cleanRemoteTempPath(out)
+}
+
+// wslMakeDir creates a temp directory inside the distro and returns its path.
+func wslMakeDir(distro string) (string, error) {
+	out, err := wslRunCommand(distro,
+		`d=$(mktemp -d /tmp/uniterm-XXXXXX); printf '%s' "$d"`,
+		"", wslIntegrationTimeout)
+	if err != nil {
+		return "", err
+	}
+	dir, err := cleanRemoteTempPath(out)
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// wslWritePath writes content to an existing path inside the distro via
+// stdin (no shell-quoting of the content needed).
+func wslWritePath(distro, path, content string) error {
+	if strings.ContainsAny(path, " \t\"'\\\r\n") {
+		return fmt.Errorf("unsafe wsl temp path %q", path)
+	}
+	_, err := wslRunCommand(distro, "cat > '"+path+"'", content, wslIntegrationTimeout)
+	return err
 }
 
 func wslCommandLine(distro string) string {
@@ -438,8 +575,18 @@ func (s *LocalSession) readLoop() {
 		if n > 0 {
 			s.RecordReadActivity()
 			data := append([]byte(nil), buf[:n]...)
-			s.emitData(s.decodeOutput(data))
-			s.updateMouseTrackingState(data)
+			// OSC-7 extraction runs on the RAW byte stream, BEFORE decoding:
+			// the sequence is pure ASCII while legacy codecs (GBK/Big5/...)
+			// could mangle its bytes or withhold a fragment in their
+			// cross-chunk multibyte leftover. The cleaned remainder replaces
+			// the data for every downstream consumer so stripped sequences
+			// never render.
+			cwd, cleaned, found := s.osc7.Feed(data)
+			if found && TerminalCwdSink != nil {
+				TerminalCwdSink(s.id, cwd)
+			}
+			s.emitData(s.decodeOutput(cleaned))
+			s.updateMouseTrackingState(cleaned)
 		}
 		if err != nil {
 			// If the quit channel is already closed, another goroutine

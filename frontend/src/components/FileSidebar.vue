@@ -36,6 +36,11 @@
           :clipboard-count="clipboardCount"
           :clipboard-mode="clipboard?.mode"
           @navigate="onNavigate"
+          :can-back="canBack"
+          :can-forward="canForward"
+          @back="onBack"
+          @forward="onForward"
+          @up="onUp"
           @refresh="onRefresh"
           @upload="onUpload"
           @download-to="onDownloadTo"
@@ -44,6 +49,7 @@
           @mkdir="onMkdir"
           @symlink="onSymlink"
           :supports-symlink="true"
+          show-copy-path-to-terminal
           @chmod="onChmod"
           @send-to-other="onDownloadTo"
           @edit="onEditFile"
@@ -58,20 +64,34 @@
           @cancel-load="onCancelLoad"
           @save-bookmark="onSaveBookmark"
           @remove-bookmark="onRemoveBookmark"
+          @copy-path-to-terminal="onCopyPathToTerminal"
         />
       </div>
 
-      <!-- Transfer history / progress panel (pinned at the sidebar bottom) -->
+      <!-- Transfer history / progress panel (pinned at the sidebar bottom).
+           Defaults to collapsed; a new transfer expands it (see the watcher). -->
       <TransferPanel
         v-model:height="transferHeight"
+        :collapsed="sidebarTransferCollapsed"
+        @update:collapsed="(v: boolean) => sidebarTransferCollapsed = v"
         resizable
         :tasks="transferTasks"
         @cancel="onCancelTransfer"
         @pause="onPauseTransfer"
         @resume="onResumeTransfer"
+        @retry="onRetryTransfer"
         @clearCompleted="clearFinishedTransfers"
       >
         <template #actions>
+          <button
+            class="filter-icon-btn"
+            :class="{ active: followActive }"
+            :disabled="!followSupported"
+            :title="t('sftp.followPath')"
+            @click="toggleFollow"
+          ><el-icon><FolderSync :size="14" /></el-icon></button>
+        </template>
+        <template #actions-end>
           <button
             class="filter-icon-btn"
             :disabled="!sessionId"
@@ -127,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { ExternalLink } from '@lucide/vue'
+import { ExternalLink, FolderSync } from '@lucide/vue'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from '../i18n'
 import { msg } from '../services/message'
@@ -151,6 +171,7 @@ import FileGenericDialog from './FileGenericDialog.vue'
 import FileConflictDialog from './FileConflictDialog.vue'
 import { Events } from '@wailsio/runtime'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
+import { queuedSessionWrite } from '../services/sessionWriter'
 
 const { t } = useI18n()
 bindExtEditUploadedToast()
@@ -162,6 +183,10 @@ const connecting = ref(false)
 const connectError = ref('')
 // Transfer panel: default height (px), adjustable by dragging its top edge.
 const transferHeight = ref(130)
+// The transfer panel starts COLLAPSED (only its button bar shows) and a new
+// transfer expands it — the user can always re-collapse via the bar's toggle.
+const sidebarTransferCollapsed = ref(true)
+const seenTransferIds = new Set<string>()
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let refreshDebounce: ReturnType<typeof setTimeout> | null = null
@@ -173,6 +198,15 @@ const FILE_DROP_ID = 'file-sidebar-drop'
 const sessionId = computed(() => companionStore.currentSftpSessionId)
 const transferKey = computed(() => companionStore.transferKey || 'companion-sftp')
 const transferTasks = computed(() => panelStore.getTransferTasks(transferKey.value))
+// Auto-expand the collapsed panel whenever a NEW transfer task appears.
+watch(transferTasks, (tasks) => {
+  for (const task of tasks) {
+    if (!seenTransferIds.has(task.id)) {
+      seenTransferIds.add(task.id)
+      sidebarTransferCollapsed.value = false
+    }
+  }
+})
 const transferEvents = useTransferTaskEvents(
   () => transferTasks.value,
   () => sessionId.value,
@@ -226,7 +260,8 @@ const listing = useFileListing({
     return false
   },
 })
-const { cwd, files, loading, onRefresh, onNavigate, onCancelLoad } = listing
+const { cwd, files, loading, onRefresh, onNavigate, onCancelLoad,
+  canBack, canForward, onBack, onForward, onUp } = listing
 
 // Shared dialog + conflict plumbing and the per-panel file actions live in
 // the useFilePanel composable (same implementation as the SFTP tab's panes).
@@ -265,6 +300,63 @@ function openStandaloneSftp() {
   window.dispatchEvent(new CustomEvent(ev, { detail: panel }))
 }
 
+// ── "Follow terminal path" (per-panel toggle) ──
+// When enabled for the active SSH/WSL panel, the sidebar navigates whenever the
+// panel's terminal shell reports a cwd change (terminal:cwd, emitted by the
+// backend on OSC 7 / shell integration). The flag is per panel id and
+// ephemeral; rapid cd chains are debounced (trailing) so only the last path
+// navigates.
+const followActive = computed(() => {
+  const pid = companionStore.activeFilesPanelId
+  return !!pid && companionStore.followPathByPanel[pid] !== false
+})
+// Following requires an SSH or WSL terminal panel (the only panels that emit
+// terminal:cwd with POSIX paths).
+const followSupported = computed(() => !!companionStore.activeFilesPanelId)
+
+function toggleFollow() {
+  const pid = companionStore.activeFilesPanelId
+  if (!pid) return
+  companionStore.toggleFollowPath(pid)
+}
+
+let followTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleFollowNavigate(path: string) {
+  if (followTimer) clearTimeout(followTimer)
+  followTimer = setTimeout(() => {
+    followTimer = null
+    // Re-check: the sidebar may have navigated elsewhere during the debounce.
+    if (path === cwd.value) return
+    onNavigate(path)
+  }, 300)
+}
+
+let unsubCwd: (() => void) | null = null
+
+function onTerminalCwd(ev: { data?: unknown }) {
+  const p = ev?.data as { sessionId?: string; cwd?: string } | undefined
+  if (!p?.sessionId || !p.cwd) return
+  // Only the active SSH/WSL panel's own terminal session drives navigation.
+  const pid = companionStore.activeFilesPanelId
+  if (!pid || companionStore.followPathByPanel[pid] === false) return
+  const panel = panelStore.getPanel(pid)
+  if (!panel || panel.sessionId !== p.sessionId) return
+  if (!p.cwd.startsWith('/')) return // Windows local terminals are out of scope
+  scheduleFollowNavigate(p.cwd)
+}
+
+// "Copy path to terminal" (FileList context menu): the clipboard write already
+// happened in FileList. Additionally, type the path at the prompt of the
+// terminal panel that owns this sidebar — the SSH (or WSL) panel tracked by the
+// companion store, whose panel session IS the terminal. Without one, no-op.
+function onCopyPathToTerminal(text: string) {
+  const pid = companionStore.activeFilesPanelId
+  const sid = pid ? panelStore.getPanel(pid)?.sessionId : null
+  if (!sid) return
+  // Path only — no trailing newline, so the user can complete the command.
+  queuedSessionWrite(sid, text)
+}
+
 // ── Change-permission dialog (shared FileChmodDialog) ──
 const chmod = useChmodDialog({
   target: (item) => {
@@ -288,7 +380,7 @@ const {
   onRename, onDelete, onMkdir, onNewFile, onSymlink,
   onUpload, onDownloadTo,
   onEditFile, onEditExternal,
-  onCancelTransfer, onPauseTransfer, onResumeTransfer, clearFinishedTransfers,
+  onCancelTransfer, onPauseTransfer, onResumeTransfer, onRetryTransfer, clearFinishedTransfers,
   onSaveBookmark, onRemoveBookmark,
   uploadPaths,
 } = useFilePanel({
@@ -309,16 +401,31 @@ let unsubStatus: (() => void) | null = null
 let unsubData: (() => void) | null = null
 let unsubExtEdit: (() => void) | null = null
 
+// On disconnect/error nothing will ever complete the in-flight transfers, so
+// mark them (and their running files) failed here — otherwise they would sit
+// as "running" forever. Failed tasks become retryable in the transfer panel.
+function markTransferTasksDisconnected() {
+  for (const t of transferTasks.value) {
+    if (t.status === 'running' || t.status === 'paused') {
+      t.status = 'error'
+      t.files.forEach(f => { if (f.status === 'running') f.status = 'failed' })
+    }
+  }
+}
+
 function bindListeners() {
   unsubStatus?.()
   unsubData?.()
   unsubExtEdit?.()
-  unsubStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data; 
+  unsubStatus =Events.On('session:status', (ev) => { const payload: { id: string; status: string } = ev.data;
     if (payload.id !== sessionId.value) return
     if (payload.status === 'connected') {
       onRefresh()
     } else if (payload.status === 'error') {
+      markTransferTasksDisconnected()
       connectError.value = t('sftp.connectError')
+    } else if (payload.status === 'disconnected') {
+      markTransferTasksDisconnected()
     }
    })
   unsubData =Events.On('session:data', (ev) => { const payload: { id: string; data: string } = ev.data;
@@ -398,6 +505,8 @@ watch(() => companionStore.activeFilesPanelId, () => {
 
 onMounted(() => {
   bindListeners()
+  // Terminal cwd reports (OSC 7 / shell integration) for path following.
+  unsubCwd = Events.On('terminal:cwd', onTerminalCwd)
   // Re-mounting after the view was hidden (e.g. switching files<->monitor):
   // restore this panel's cached listing since the session didn't change.
   restoreCache()
@@ -411,8 +520,10 @@ onUnmounted(() => {
   unsubStatus?.()
   unsubData?.()
   unsubExtEdit?.()
+  unsubCwd?.()
   unbindFileDrop()
   if (refreshTimer) clearTimeout(refreshTimer)
+  if (followTimer) clearTimeout(followTimer)
 })
 </script>
 
@@ -465,6 +576,10 @@ onUnmounted(() => {
 .filter-icon-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.filter-icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
 }
 .transfer-badge {
   position: absolute;

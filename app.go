@@ -115,7 +115,7 @@ type App struct {
 }
 
 func NewApp(webviewDataPath string) *App {
-	return &App{
+	a := &App{
 		webviewDataPath:    webviewDataPath,
 		panelLogs:          make(map[string]*session.OutputLogger),
 		sessionToPanel:     make(map[string]string),
@@ -124,6 +124,21 @@ func NewApp(webviewDataPath string) *App {
 		containerManager:   container.NewManager(),
 		errCh:              make(chan error, 16),
 	}
+
+	// Transfer progress is published as Wails events, not OSC sequences in the
+	// terminal data stream.
+	session.TransferEventSink = func(sid string, payload map[string]any) {
+		a.emit("sftp:transfer", payload)
+	}
+
+	// OSC-7 cwd reports from SSH/WSL terminals (see backend/session/shell_
+	// integration.go) are forwarded so the frontend can follow the active
+	// directory in the sidebar.
+	session.TerminalCwdSink = func(sid string, cwd string) {
+		a.emit("terminal:cwd", map[string]any{"sessionId": sid, "cwd": cwd})
+	}
+
+	return a
 }
 
 // emit is a v3 helper that forwards an event to the frontend. It no-ops when

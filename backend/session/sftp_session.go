@@ -3,7 +3,6 @@ package session
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -60,6 +59,22 @@ func (s *SFTPSession) SetMaxConcurrency(n int) {
 	}
 }
 
+// fileSessionKeepAliveInterval keeps NAT/firewall mappings alive and lets the
+// server's ClientAliveInterval see traffic (SFTP/SCP dropped after short idle
+// periods). Send-only, mirroring SSHSession.startKeepAlive.
+const fileSessionKeepAliveInterval = 60 * time.Second
+
+func startFileSessionKeepAlive(client *ssh.Client, sess func() SessionStatus) {
+	ticker := time.NewTicker(fileSessionKeepAliveInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if client == nil || sess() != StatusConnected {
+			return
+		}
+		_, _, _ = client.SendRequest("keepalive@openssh.com", false, nil)
+	}
+}
+
 func (s *SFTPSession) Connect(config ConnectionConfig) error {
 	s.setStatus(StatusConnecting)
 	s.title = fmt.Sprintf("%s@%s", config.User, config.Host)
@@ -105,6 +120,7 @@ func (s *SFTPSession) Connect(config ConnectionConfig) error {
 	}()
 
 	s.sshClient = client
+	go startFileSessionKeepAlive(client, s.Status)
 	s.sftpClient = sc
 	// Preload remote user/group name maps so list owners show names, not numbers.
 	s.loadUserGroupMaps()
@@ -273,19 +289,91 @@ type FileListResult struct {
 	Dir   string     `json:"dir"`
 }
 
-// TransferTask tracks an ongoing file transfer.
+// TransferTask tracks an ongoing file transfer. Directory transfers carry
+// per-file state (FileCount / CompletedFiles / FailedFiles / fileState) so the
+// UI can show per-file progress and a retry can skip completed files.
 type TransferTask struct {
 	ID         string
 	Type       string // "upload" | "download"
 	LocalPath  string
 	RemotePath string
-	Progress   int64
-	Total      int64
+	Progress   atomic.Int64
+	Total      int64  // write via setTotal, read via loadTotal (guarded by fileMu)
 	Status     string // "pending" | "running" | "paused" | "done" | "error" | "cancelled"
-	ctx        context.Context
-	cancel     context.CancelFunc
-	paused     bool
-	pauseCh    chan struct{}
+
+	CurrentFile    string        // first in-flight file (display)
+	FileCount      int           // total files in a directory transfer (0 = single file)
+	CompletedFiles int
+	FailedFiles    []FileFailure
+
+	// skip lists relative paths already transferred in a previous attempt
+	// (retry checkpoint). nil = transfer everything.
+	skip   map[string]bool
+	fileMu sync.RWMutex
+
+	ctx     context.Context
+	cancel  context.CancelFunc
+	// paused is read by transfer worker goroutines (waitIfPaused) and written
+	// by the frontend-driven Pause/Resume entry points on other goroutines, so
+	// it is an atomic rather than a plain bool (was a data race).
+	paused  atomic.Bool
+	pauseCh chan struct{}
+}
+
+func (t *TransferTask) addProgress(n int64) { t.Progress.Add(n) }
+func (t *TransferTask) loadProgress() int64 { return t.Progress.Load() }
+func (t *TransferTask) setProgress(v int64) { t.Progress.Store(v) }
+func (t *TransferTask) setTotal(v int64)    { t.fileMu.Lock(); t.Total = v; t.fileMu.Unlock() }
+func (t *TransferTask) loadTotal() int64    { t.fileMu.RLock(); defer t.fileMu.RUnlock(); return t.Total }
+func (t *TransferTask) setFileCount(n int)  { t.fileMu.Lock(); t.FileCount = n; t.fileMu.Unlock() }
+func (t *TransferTask) fileCount() int      { t.fileMu.RLock(); defer t.fileMu.RUnlock(); return t.FileCount }
+func (t *TransferTask) completedCount() int { t.fileMu.Lock(); defer t.fileMu.Unlock(); return t.CompletedFiles }
+
+func (t *TransferTask) SetSkip(rels []string) {
+	t.fileMu.Lock()
+	t.skip = make(map[string]bool, len(rels))
+	for _, r := range rels {
+		t.skip[r] = true
+	}
+	t.fileMu.Unlock()
+}
+
+func (t *TransferTask) shouldSkip(rel string) bool {
+	t.fileMu.Lock()
+	defer t.fileMu.Unlock()
+	return t.skip != nil && t.skip[rel]
+}
+
+func (t *TransferTask) beginFile(rel string) {
+	t.fileMu.Lock()
+	t.CurrentFile = rel
+	t.fileMu.Unlock()
+}
+
+func (t *TransferTask) finishFile(rel string) {
+	t.fileMu.Lock()
+	t.CompletedFiles++
+	if t.CurrentFile == rel {
+		t.CurrentFile = ""
+	}
+	t.fileMu.Unlock()
+}
+
+func (t *TransferTask) failFile(rel string, err error) {
+	t.fileMu.Lock()
+	t.FailedFiles = append(t.FailedFiles, FileFailure{Path: rel, Error: err.Error()})
+	if t.CurrentFile == rel {
+		t.CurrentFile = ""
+	}
+	t.fileMu.Unlock()
+}
+
+func (t *TransferTask) clearCurrent(rel string) {
+	t.fileMu.Lock()
+	if t.CurrentFile == rel {
+		t.CurrentFile = ""
+	}
+	t.fileMu.Unlock()
 }
 
 func (t *TransferTask) start() {
@@ -299,9 +387,12 @@ func (t *TransferTask) done() {
 	}
 }
 
+func (t *TransferTask) setPaused(v bool) { t.paused.Store(v) }
+func (t *TransferTask) isPaused() bool   { return t.paused.Load() }
+
 func (t *TransferTask) waitIfPaused() {
 	for {
-		if t.paused {
+		if t.isPaused() {
 			select {
 			case <-t.pauseCh:
 				continue
@@ -584,39 +675,7 @@ func (s *SFTPSession) Get(remotePath, localPath string, recursive bool) (string,
 		lp = filepath.Join(s.localCwd, lp)
 	}
 	if recursive {
-		total, err := s.dirSizeRemote(rp)
-		if err != nil {
-			return "", err
-		}
-		task := &TransferTask{
-			ID:         s.nextTaskID("dl"),
-			Type:       "download",
-			LocalPath:  lp,
-			RemotePath: rp,
-			Total:      total,
-			Status:     "running",
-		}
-		task.start()
-		s.mu.Lock()
-		s.transfers[task.ID] = task
-		s.mu.Unlock()
-		s.emitTransferStart(task)
-		go func() {
-			defer func() {
-				task.done()
-				s.mu.Lock()
-				delete(s.transfers, task.ID)
-				s.mu.Unlock()
-			}()
-			if err := s.downloadDir(rp, lp, task); err != nil {
-				task.Status = "error"
-				s.emitTransferEvent(task, err)
-				return
-			}
-			task.Status = "done"
-			s.emitTransferComplete(task)
-		}()
-		return task.ID, nil
+		return s.startDirTransfer("download", lp, rp, nil)
 	}
 	task := &TransferTask{
 		ID:         s.nextTaskID("dl"),
@@ -642,39 +701,7 @@ func (s *SFTPSession) Put(localPath, remotePath string, recursive bool) (string,
 		rp = path.Join(s.cwd, rp)
 	}
 	if recursive {
-		total, err := s.dirSizeLocal(lp)
-		if err != nil {
-			return "", err
-		}
-		task := &TransferTask{
-			ID:         s.nextTaskID("ul"),
-			Type:       "upload",
-			LocalPath:  lp,
-			RemotePath: rp,
-			Total:      total,
-			Status:     "running",
-		}
-		task.start()
-		s.mu.Lock()
-		s.transfers[task.ID] = task
-		s.mu.Unlock()
-		s.emitTransferStart(task)
-		go func() {
-			defer func() {
-				task.done()
-				s.mu.Lock()
-				delete(s.transfers, task.ID)
-				s.mu.Unlock()
-			}()
-			if err := s.uploadDir(lp, rp, task); err != nil {
-				task.Status = "error"
-				s.emitTransferEvent(task, err)
-				return
-			}
-			task.Status = "done"
-			s.emitTransferComplete(task)
-		}()
-		return task.ID, nil
+		return s.startDirTransfer("upload", lp, rp, nil)
 	}
 	task := &TransferTask{
 		ID:         s.nextTaskID("ul"),
@@ -684,6 +711,77 @@ func (s *SFTPSession) Put(localPath, remotePath string, recursive bool) (string,
 		Status:     "pending",
 	}
 	s.startTransfer(task)
+	return task.ID, nil
+}
+
+// startDirTransfer launches a recursive upload/download with per-file tracking
+// and an optional retry skip-list. The returned task stays in s.transfers when
+// it fails (retryable); it is removed when done or cancelled.
+func (s *SFTPSession) startDirTransfer(tfType, lp, rp string, skip []string) (string, error) {
+	var total int64
+	var err error
+	if tfType == "download" {
+		total, err = s.dirSizeRemote(rp)
+	} else {
+		total, err = s.dirSizeLocal(lp)
+	}
+	if err != nil {
+		return "", err
+	}
+	task := &TransferTask{
+		ID:         s.nextTaskID(map[bool]string{true: "dl", false: "ul"}[tfType == "download"]),
+		Type:       tfType,
+		LocalPath:  lp,
+		RemotePath: rp,
+		Status:     "running",
+	}
+	task.setTotal(total)
+	if len(skip) > 0 {
+		task.SetSkip(skip)
+	}
+	task.start()
+	s.mu.Lock()
+	s.transfers[task.ID] = task
+	s.mu.Unlock()
+	s.emitTransferStart(task)
+	go func() {
+		defer task.done()
+		var derr error
+		if tfType == "download" {
+			derr = s.downloadDir(rp, lp, task)
+		} else {
+			derr = s.uploadDir(lp, rp, task)
+		}
+		task.fileMu.RLock()
+		failed := task.FailedFiles
+		task.fileMu.RUnlock()
+		if task.ctx.Err() != nil {
+			// Cancelled takes precedence over any per-file failures.
+			task.Status = "cancelled"
+			s.emitTransferComplete(task)
+			s.mu.Lock()
+			delete(s.transfers, task.ID)
+			s.mu.Unlock()
+			return
+		}
+		if derr != nil && len(failed) == 0 {
+			// Walk-level failure (e.g. root ReadDir) with nothing attempted.
+			task.Status = "error"
+			s.emitTransferEvent(task, derr)
+			return // kept in s.transfers for retry
+		}
+		if len(failed) > 0 {
+			task.Status = "error"
+			s.emitTransferComplete(task)
+			return // kept for retry
+		}
+		task.Status = "done"
+		s.emitTransferProgressForced(task)
+		s.emitTransferComplete(task)
+		s.mu.Lock()
+		delete(s.transfers, task.ID)
+		s.mu.Unlock()
+	}()
 	return task.ID, nil
 }
 
@@ -882,6 +980,33 @@ func (s *SFTPSession) Move(oldPath, newPath string) error {
 	return session.Run(fmt.Sprintf("mv -- %s %s", shellEscape(old), shellEscape(n)))
 }
 
+// RetryTransfer (re)starts a transfer from a frontend-held checkpoint. For
+// recursive transfers, files listed in skipCompleted (paths relative to the
+// transfer root, '/'-separated) are counted as done without re-transferring.
+func (s *SFTPSession) RetryTransfer(spec TransferSpec, skipCompleted []string) (string, error) {
+	if err := s.requireClient(); err != nil {
+		return "", err
+	}
+	if spec.Recursive {
+		if spec.Type == "download" {
+			return s.startDirTransfer("download", spec.LocalPath, spec.RemotePath, skipCompleted)
+		}
+		return s.startDirTransfer("upload", spec.LocalPath, spec.RemotePath, skipCompleted)
+	}
+	if spec.Type == "download" {
+		return s.Get(spec.RemotePath, spec.LocalPath, false)
+	}
+	return s.Put(spec.LocalPath, spec.RemotePath, false)
+}
+
+// DismissTransfer drops a retained (failed) task from the transfers map.
+func (s *SFTPSession) DismissTransfer(taskID string) error {
+	s.mu.Lock()
+	delete(s.transfers, taskID)
+	s.mu.Unlock()
+	return nil
+}
+
 // CancelTransfer cancels an ongoing transfer task.
 func (s *SFTPSession) CancelTransfer(taskID string) error {
 	s.mu.Lock()
@@ -904,13 +1029,15 @@ func (s *SFTPSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
-	s.emitTransferComplete(task)
+	s.emitTransferPaused(task)
 	return nil
 }
 
-// ResumeTransfer resumes a paused transfer task.
+// ResumeTransfer resumes a paused transfer task. It is rejected unless the
+// task is actually paused ("task not active"), so a stale or finished task
+// cannot be resumed into a bogus running state.
 func (s *SFTPSession) ResumeTransfer(taskID string) error {
 	s.mu.Lock()
 	task, ok := s.transfers[taskID]
@@ -918,11 +1045,14 @@ func (s *SFTPSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	if task.Status != "paused" {
+		return fmt.Errorf("task not active: %s", taskID)
+	}
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})
-	s.emitTransferStart(task)
+	s.emitTransferResumed(task)
 	return nil
 }
 
@@ -1036,12 +1166,14 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 	s.transfers[task.ID] = task
 	s.mu.Unlock()
 	go func() {
-		defer func() {
-			task.done()
+		// The task is deleted from s.transfers only when done or cancelled;
+		// on error it is retained so a later retry can resume it.
+		removeTask := func() {
 			s.mu.Lock()
 			delete(s.transfers, task.ID)
 			s.mu.Unlock()
-		}()
+		}
+		defer task.done()
 		task.Status = "running"
 		s.emitTransferStart(task)
 
@@ -1053,6 +1185,7 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 			case <-task.ctx.Done():
 				task.Status = "cancelled"
 				s.emitTransferComplete(task)
+				removeTask()
 				return
 			}
 		}
@@ -1063,19 +1196,17 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 		if task.Type == "download" {
 			remoteFile, e := s.sftpClient.Open(task.RemotePath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
 			defer remoteFile.Close()
 			fi, _ := remoteFile.Stat()
 			if fi != nil {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 			src = remoteFile
 			localFile, e := os.Create(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
@@ -1084,19 +1215,17 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 		} else {
 			localFile, e := os.Open(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
 			defer localFile.Close()
 			fi, _ := localFile.Stat()
 			if fi != nil {
-				task.Total = fi.Size()
+				task.setTotal(fi.Size())
 			}
 			src = localFile
 			remoteFile, e := s.sftpClient.Create(task.RemotePath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
@@ -1110,6 +1239,7 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 			case <-task.ctx.Done():
 				task.Status = "cancelled"
 				s.emitTransferComplete(task)
+				removeTask()
 				return
 			default:
 			}
@@ -1118,30 +1248,40 @@ func (s *SFTPSession) startTransfer(task *TransferTask) {
 			case <-task.ctx.Done():
 				task.Status = "cancelled"
 				s.emitTransferComplete(task)
+				removeTask()
 				return
 			default:
 			}
 			n, e := src.Read(buf)
 			if n > 0 {
 				dst.Write(buf[:n])
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 				s.emitTransferProgress(task)
 			}
 			if e == io.EOF {
 				break
 			}
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
 		}
 		task.Status = "done"
 		s.emitTransferComplete(task)
+		removeTask()
 	}()
 }
 
-func (s *SFTPSession) downloadDir(remoteDir, localDir string, task *TransferTask) error {
+// dirEntry2 is one file scheduled for transfer inside a directory task.
+type dirEntry2 struct{ lp, rp, rel string }
+
+// relPath returns p relative to root with '/' separators; "" if equal.
+func relPath(p, root string) string {
+	r := strings.TrimPrefix(p, root)
+	return strings.TrimPrefix(r, "/")
+}
+
+func (s *SFTPSession) walkRemoteForDownload(remoteDir, localDir string, task *TransferTask, out *[]dirEntry2) error {
 	select {
 	case <-task.ctx.Done():
 		return task.ctx.Err()
@@ -1158,19 +1298,17 @@ func (s *SFTPSession) downloadDir(remoteDir, localDir string, task *TransferTask
 		rp := path.Join(remoteDir, fi.Name())
 		lp := filepath.Join(localDir, fi.Name())
 		if fi.IsDir() {
-			if err := s.downloadDir(rp, lp, task); err != nil {
+			if err := s.walkRemoteForDownload(rp, lp, task, out); err != nil {
 				return err
 			}
 		} else {
-			if err := s.transferFile(task, lp, rp, "download"); err != nil {
-				return err
-			}
+			*out = append(*out, dirEntry2{lp: lp, rp: rp, rel: relPath(rp, task.RemotePath)})
 		}
 	}
 	return nil
 }
 
-func (s *SFTPSession) uploadDir(localDir, remoteDir string, task *TransferTask) error {
+func (s *SFTPSession) walkLocalForUpload(localDir, remoteDir string, task *TransferTask, out *[]dirEntry2) error {
 	select {
 	case <-task.ctx.Done():
 		return task.ctx.Err()
@@ -1184,19 +1322,118 @@ func (s *SFTPSession) uploadDir(localDir, remoteDir string, task *TransferTask) 
 		return err
 	}
 	for _, entry := range entries {
-		rp := path.Join(remoteDir, entry.Name())
 		lp := filepath.Join(localDir, entry.Name())
+		rp := path.Join(remoteDir, entry.Name())
 		if entry.IsDir() {
-			if err := s.uploadDir(lp, rp, task); err != nil {
+			if err := s.walkLocalForUpload(lp, rp, task, out); err != nil {
 				return err
 			}
 		} else {
-			if err := s.transferFile(task, lp, rp, "upload"); err != nil {
-				return err
-			}
+			*out = append(*out, dirEntry2{lp: lp, rp: rp, rel: relPath(rp, task.RemotePath)})
 		}
 	}
 	return nil
+}
+
+func (s *SFTPSession) downloadDir(remoteDir, localDir string, task *TransferTask) error {
+	var files []dirEntry2
+	if err := s.walkRemoteForDownload(remoteDir, localDir, task, &files); err != nil {
+		if task.ctx.Err() != nil {
+			return task.ctx.Err()
+		}
+		task.failFile(relPath(remoteDir, task.RemotePath), err)
+		return nil // recorded as a failed entry; task finalizes with status error
+	}
+	s.runTransferPool(task, files, "download")
+	return nil
+}
+
+func (s *SFTPSession) uploadDir(localDir, remoteDir string, task *TransferTask) error {
+	var files []dirEntry2
+	if err := s.walkLocalForUpload(localDir, remoteDir, task, &files); err != nil {
+		if task.ctx.Err() != nil {
+			return task.ctx.Err()
+		}
+		task.failFile(relPath(remoteDir, task.RemotePath), err)
+		return nil // recorded as a failed entry; task finalizes with status error
+	}
+	s.runTransferPool(task, files, "upload")
+	return nil
+}
+
+// transferDirEntry transfers one file of a directory task while holding a
+// concurrency slot, released via defer so a panic cannot leak the slot. The
+// acquire is cancellable: a worker blocked on the semaphore returns without
+// transferring when the task is cancelled.
+func (s *SFTPSession) transferDirEntry(task *TransferTask, e dirEntry2, tfType string) {
+	if s.sem != nil {
+		select {
+		case s.sem <- struct{}{}:
+			defer func() { <-s.sem }()
+		case <-task.ctx.Done():
+			return
+		}
+	}
+	s.emitFileStart(task, e.rel, filepath.Base(e.rel))
+	task.beginFile(e.rel)
+	err := s.transferFile(task, e.lp, e.rp, tfType)
+	if err != nil && task.ctx.Err() != nil {
+		task.clearCurrent(e.rel) // cancelled mid-file: not a file failure
+	} else if err != nil {
+		task.failFile(e.rel, err)
+		s.emitFileFailed(task, e.rel, err)
+	} else {
+		task.finishFile(e.rel)
+		s.emitFileDone(task, e.rel)
+	}
+	s.emitTransferProgress(task)
+}
+
+// runTransferPool processes files through a bounded worker pool. Bounded by
+// the connection's SftpMaxConcurrency (its semaphore); defaults to 4 workers
+// when the session has no semaphore set.
+func (s *SFTPSession) runTransferPool(task *TransferTask, files []dirEntry2, tfType string) {
+	task.setFileCount(len(files))
+	if len(files) == 0 {
+		return
+	}
+	workers := 4
+	if s.sem != nil {
+		workers = cap(s.sem)
+	}
+	if workers > len(files) {
+		workers = len(files)
+	}
+	ch := make(chan dirEntry2)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for e := range ch {
+				if task.ctx.Err() != nil {
+					continue // cancelled: drain without transferring
+				}
+				task.waitIfPaused()
+				if task.shouldSkip(e.rel) {
+					task.beginFile(e.rel)
+					task.finishFile(e.rel)
+					continue
+				}
+				s.transferDirEntry(task, e, tfType)
+			}
+		}()
+	}
+feed:
+	for _, f := range files {
+		select {
+		case ch <- f:
+		case <-task.ctx.Done():
+			break feed
+		}
+	}
+	close(ch)
+	wg.Wait()
 }
 
 func (s *SFTPSession) transferFile(task *TransferTask, localPath, remotePath, tfType string) error {
@@ -1222,7 +1459,7 @@ func (s *SFTPSession) transferFile(task *TransferTask, localPath, remotePath, tf
 			n, e := src.Read(buf)
 			if n > 0 {
 				dst.Write(buf[:n])
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 				s.emitTransferProgress(task)
 			}
 			if e != nil {
@@ -1251,7 +1488,7 @@ func (s *SFTPSession) transferFile(task *TransferTask, localPath, remotePath, tf
 			n, e := src.Read(buf)
 			if n > 0 {
 				dst.Write(buf[:n])
-				task.Progress += int64(n)
+				task.addProgress(int64(n))
 				s.emitTransferProgress(task)
 			}
 			if e != nil {
@@ -1262,56 +1499,3 @@ func (s *SFTPSession) transferFile(task *TransferTask, localPath, remotePath, tf
 	return nil
 }
 
-// --- Transfer event emitters ---
-
-func (s *SFTPSession) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SFTPSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SFTPSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SFTPSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}

@@ -3,7 +3,7 @@ package session
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -92,6 +92,7 @@ func (s *SCPSession) Connect(config ConnectionConfig) error {
 	s.mu.Lock()
 	s.sshClient = client
 	s.mu.Unlock()
+	go startFileSessionKeepAlive(client, s.Status)
 
 	// Resolve the login home directory as the initial remote cwd. Login
 	// banners may print before it, so take the last non-empty line.
@@ -785,8 +786,7 @@ func (c *scpProtoConn) receiveFileBody(line string, w io.Writer, task *TransferT
 // scpFetchTree downloads a remote directory tree via "scp -rf". The first D
 // directive (the requested directory itself) maps onto localRoot; nested
 // entries are placed beneath it, mirroring the SFTP backend's downloadDir
-// semantics (contents copied INTO localRoot). onFile reports each completed
-// file's size.
+// semantics (contents copied INTO localRoot).
 func (s *SCPSession) scpFetchTree(remoteDir, localRoot string, task *TransferTask) error {
 	c, err := s.scpExec("rf", remoteDir)
 	if err != nil {
@@ -796,9 +796,19 @@ func (s *SCPSession) scpFetchTree(remoteDir, localRoot string, task *TransferTas
 	if err := c.ack(); err != nil {
 		return err
 	}
+	return s.fetchTree(c, remoteDir, localRoot, task)
+}
 
-	var stack []string // current local directory path per open D directive
+// fetchTree drives the "scp -rf" directive walk on an already-open protocol
+// connection. Split from scpFetchTree so tests can drive the walker with a
+// fake connection. Per-file tracking: skipped files (retry checkpoint) have
+// their body consumed and count as done; a file that fails is recorded in
+// FailedFiles and the walk continues with the next sibling.
+func (s *SCPSession) fetchTree(c *scpProtoConn, remoteDir, localRoot string, task *TransferTask) error {
+	var stack []string  // current local directory path per open D directive
+	var rstack []string // current remote directory path per open D directive
 	cur := localRoot
+	rcur := remoteDir
 	first := true
 	for {
 		if err := task.ctx.Err(); err != nil {
@@ -813,7 +823,7 @@ func (s *SCPSession) scpFetchTree(remoteDir, localRoot string, task *TransferTas
 			continue
 		}
 		switch line[0] {
-		case 'T':
+		case 'T': // times (only sent with -p, ack and ignore for safety)
 			if err := c.ack(); err != nil {
 				return err
 			}
@@ -823,50 +833,108 @@ func (s *SCPSession) scpFetchTree(remoteDir, localRoot string, task *TransferTas
 				return fmt.Errorf("scp: protocol error: bad dir directive %q", line)
 			}
 			dir := path.Join(cur, name)
+			rdir := path.Join(rcur, name)
 			if first {
 				// The requested directory itself: its content lands in localRoot.
 				dir = localRoot
+				rdir = remoteDir
 				first = false
 			}
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
 			}
 			stack = append(stack, cur)
-			cur = dir
+			rstack = append(rstack, rcur)
+			cur, rcur = dir, rdir
 			if err := c.ack(); err != nil {
 				return err
 			}
 		case 'E':
+			// OpenSSH "scp -f -r" sends exactly one E per D (including the root
+			// D), so the E that closes the root directory terminates the
+			// transfer. Returning on the empty stack right after popping keeps
+			// that final E from falling through to a read that hits EOF.
+			if len(stack) == 0 {
+				return nil // already at root: nothing left to close
+			}
+			cur = stack[len(stack)-1]
+			rcur = rstack[len(rstack)-1]
+			stack = stack[:len(stack)-1]
+			rstack = rstack[:len(rstack)-1]
 			if len(stack) == 0 {
 				return nil // tree complete
 			}
-			cur = stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
 			if err := c.ack(); err != nil {
 				return err
 			}
 		case 'C':
 			name := scpDirectiveName(line)
 			local := path.Join(cur, name)
-			f, err := os.Create(local)
-			if err != nil {
-				return err
-			}
-			rerr := c.receiveFileBody(line, f, task, nil, func(n int64) {
-				task.Progress += n
-				s.emitTransferProgress(task)
-			})
-			f.Close()
-			if rerr != nil {
-				return rerr
-			}
-			if err := c.ack(); err != nil {
+			rel := relPath(path.Join(rcur, name), task.RemotePath)
+			if err := s.fetchTreeFile(c, line, local, rel, name, task); err != nil {
 				return err
 			}
 		default:
 			return fmt.Errorf("scp: protocol error: unexpected directive %q", line)
 		}
 	}
+}
+
+// fetchTreeFile transfers one C directive inside a tree download with per-file
+// tracking. Skipped files (retry checkpoint) have their body consumed to keep
+// the protocol stream in sync and count as done without re-transferring; a
+// file whose local create fails is recorded in FailedFiles and the walk
+// continues (the body is drained so siblings still transfer). A failure while
+// reading the body desynchronizes the stream and aborts the walk.
+func (s *SCPSession) fetchTreeFile(c *scpProtoConn, line, local, rel, name string, task *TransferTask) error {
+	if task.shouldSkip(rel) {
+		if err := c.receiveFileBody(line, io.Discard, task, nil, nil); err != nil {
+			return err
+		}
+		if err := c.ack(); err != nil {
+			return err
+		}
+		task.beginFile(rel)
+		task.finishFile(rel)
+		return nil
+	}
+	s.emitFileStart(task, rel, name)
+	task.beginFile(rel)
+	f, err := os.Create(local)
+	if err != nil {
+		task.failFile(rel, err)
+		s.emitFileFailed(task, rel, err)
+		// Drain this file's body so siblings can still transfer.
+		if derr := c.receiveFileBody(line, io.Discard, task, nil, nil); derr != nil {
+			return derr
+		}
+		if aerr := c.ack(); aerr != nil {
+			return aerr
+		}
+		s.emitTransferProgress(task)
+		return nil
+	}
+	rerr := c.receiveFileBody(line, f, task, nil, func(n int64) {
+		task.addProgress(n)
+		s.emitTransferProgress(task)
+	})
+	f.Close()
+	if rerr != nil {
+		if task.ctx.Err() != nil {
+			task.clearCurrent(rel) // cancelled mid-file: not a file failure
+			return rerr
+		}
+		task.failFile(rel, rerr)
+		s.emitFileFailed(task, rel, rerr)
+		return rerr // body partially consumed: the stream is out of sync
+	}
+	if err := c.ack(); err != nil {
+		return err
+	}
+	task.finishFile(rel)
+	s.emitFileDone(task, rel)
+	s.emitTransferProgress(task)
+	return nil
 }
 
 // scpDirectiveName extracts the trailing name from a C/D directive line.
@@ -877,6 +945,15 @@ func scpDirectiveName(line string) string {
 	}
 	return fields[2]
 }
+
+// scpStreamLostError marks a failure after which the scp protocol stream on
+// the exec channel can no longer be resynchronized (lost connection, bad ack,
+// partial file body). Tree walks must abort on it; sibling files cannot
+// proceed.
+type scpStreamLostError struct{ err error }
+
+func (e *scpStreamLostError) Error() string { return e.err.Error() }
+func (e *scpStreamLostError) Unwrap() error { return e.err }
 
 // scpSendFile uploads one local file to remotePath (the full destination
 // path) over "scp -t".
@@ -904,27 +981,34 @@ func (c *scpProtoConn) sendFileBody(localPath, remoteName string, task *Transfer
 	if err != nil {
 		return err
 	}
-	size := fi.Size()
+	return c.sendOpenedFile(f, fi.Size(), remoteName, task, progressCb)
+}
 
+// sendOpenedFile writes the C directive + data + NUL for an already-open
+// local file, waiting for the sink's acks. Once the directive is written the
+// protocol stream is committed to this file's bytes, so every later failure
+// (lost connection, bad ack, local read error) is wrapped in
+// scpStreamLostError — the walk cannot continue past a desynced stream.
+func (c *scpProtoConn) sendOpenedFile(f *os.File, size int64, remoteName string, task *TransferTask, progressCb func(int64)) error {
 	directive := fmt.Sprintf("C%04o %d %s\n", 0o644, size, sanitizeScpName(remoteName))
 	if _, err := c.stdin.Write([]byte(directive)); err != nil {
-		return fmt.Errorf("scp: lost connection: %w", err)
+		return &scpStreamLostError{err}
 	}
 	if err := c.waitAck(); err != nil {
-		return err
+		return &scpStreamLostError{err}
 	}
 	buf := make([]byte, 64*1024)
 	for {
 		select {
 		case <-task.ctx.Done():
-			return task.ctx.Err()
+			return &scpStreamLostError{task.ctx.Err()}
 		default:
 		}
 		task.waitIfPaused()
 		n, rerr := f.Read(buf)
 		if n > 0 {
 			if _, werr := c.stdin.Write(buf[:n]); werr != nil {
-				return fmt.Errorf("scp: lost connection: %w", werr)
+				return &scpStreamLostError{werr}
 			}
 			if progressCb != nil {
 				progressCb(int64(n))
@@ -934,13 +1018,16 @@ func (c *scpProtoConn) sendFileBody(localPath, remoteName string, task *Transfer
 			break
 		}
 		if rerr != nil {
-			return rerr
+			return &scpStreamLostError{rerr}
 		}
 	}
 	if _, err := c.stdin.Write([]byte{0}); err != nil {
-		return fmt.Errorf("scp: lost connection: %w", err)
+		return &scpStreamLostError{err}
 	}
-	return c.waitAck()
+	if err := c.waitAck(); err != nil {
+		return &scpStreamLostError{err}
+	}
+	return nil
 }
 
 // scpSendTree uploads a local directory tree into remoteDir (which must
@@ -955,10 +1042,15 @@ func (s *SCPSession) scpSendTree(localDir, remoteDir string, task *TransferTask)
 	if err := c.waitAck(); err != nil {
 		return err
 	}
-	return s.sendTreeEntries(c, localDir, task)
+	return s.sendTreeEntries(c, localDir, remoteDir, task)
 }
 
-func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir string, task *TransferTask) error {
+// sendTreeEntries walks the local tree and streams each entry over the open
+// protocol connection, with per-file tracking: skipped files (retry
+// checkpoint) count as done without writing anything; a file that fails to
+// open locally is recorded in FailedFiles and the walk continues (nothing was
+// written to the stream); a protocol failure aborts the walk.
+func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir, remoteDir string, task *TransferTask) error {
 	entries, err := os.ReadDir(localDir)
 	if err != nil {
 		return err
@@ -969,6 +1061,8 @@ func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir string, task *Tra
 		}
 		task.waitIfPaused()
 		local := filepath.Join(localDir, entry.Name())
+		remote := path.Join(remoteDir, entry.Name())
+		rel := relPath(remote, task.RemotePath)
 		if entry.IsDir() {
 			directive := fmt.Sprintf("D%04o 0 %s\n", 0o755, sanitizeScpName(entry.Name()))
 			if _, err := c.stdin.Write([]byte(directive)); err != nil {
@@ -977,7 +1071,7 @@ func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir string, task *Tra
 			if err := c.waitAck(); err != nil {
 				return err
 			}
-			if err := s.sendTreeEntries(c, local, task); err != nil {
+			if err := s.sendTreeEntries(c, local, remote, task); err != nil {
 				return err
 			}
 			if _, err := c.stdin.Write([]byte("E\n")); err != nil {
@@ -987,14 +1081,46 @@ func (s *SCPSession) sendTreeEntries(c *scpProtoConn, localDir string, task *Tra
 				return err
 			}
 		} else {
-			if err := c.sendFileBody(local, entry.Name(), task, func(n int64) {
-				task.Progress += n
-				s.emitTransferProgress(task)
-			}); err != nil {
+			if err := s.sendTreeFile(c, local, rel, entry.Name(), task); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+// sendTreeFile uploads one file inside a tree upload with per-file tracking.
+// Local-side failures (open/stat) keep the protocol stream in sync, so the
+// walk continues with the next sibling after recording the failure.
+func (s *SCPSession) sendTreeFile(c *scpProtoConn, localPath, rel, name string, task *TransferTask) error {
+	if task.shouldSkip(rel) {
+		task.beginFile(rel)
+		task.finishFile(rel)
+		return nil
+	}
+	s.emitFileStart(task, rel, name)
+	task.beginFile(rel)
+	err := c.sendFileBody(localPath, name, task, func(n int64) {
+		task.addProgress(n)
+		s.emitTransferProgress(task)
+	})
+	if err != nil {
+		if task.ctx.Err() != nil {
+			task.clearCurrent(rel) // cancelled mid-file: not a file failure
+			return err
+		}
+		task.failFile(rel, err)
+		s.emitFileFailed(task, rel, err)
+		var lost *scpStreamLostError
+		if errors.As(err, &lost) {
+			return err // stream desynced: abort the walk
+		}
+		s.emitTransferProgress(task)
+		return nil // local-side failure: continue with siblings
+	}
+	task.finishFile(rel)
+	s.emitFileDone(task, rel)
+	s.emitTransferProgress(task)
 	return nil
 }
 
@@ -1006,48 +1132,58 @@ func sanitizeScpName(name string) string {
 
 // --- Local size helpers ---
 
-func (s *SCPSession) dirSizeRemote(dir string) (int64, error) {
+// dirStatsRemote returns the recursive byte total and file count of a remote
+// directory tree (one `ls -la` round trip per directory).
+func (s *SCPSession) dirStatsRemote(dir string) (int64, int, error) {
 	out, err := s.runCommand("ls -la "+shellEscape(dir), 25*time.Second)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	var total int64
+	var files int
 	for _, e := range parseLsLongListing(out) {
 		if strings.HasPrefix(e.Mode, "d") {
-			sz, err := s.dirSizeRemote(path.Join(dir, e.Name))
+			sz, n, err := s.dirStatsRemote(path.Join(dir, e.Name))
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 			total += sz
+			files += n
 		} else {
 			total += e.Size
+			files++
 		}
 	}
-	return total, nil
+	return total, files, nil
 }
 
-func (s *SCPSession) dirSizeLocal(dir string) (int64, error) {
+// dirStatsLocal returns the recursive byte total and file count of a local
+// directory tree.
+func (s *SCPSession) dirStatsLocal(dir string) (int64, int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	var total int64
+	var files int
 	for _, e := range entries {
 		if e.IsDir() {
-			sz, err := s.dirSizeLocal(filepath.Join(dir, e.Name()))
+			sz, n, err := s.dirStatsLocal(filepath.Join(dir, e.Name()))
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 			total += sz
+			files += n
 		} else {
 			fi, err := e.Info()
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 			total += fi.Size()
+			files++
 		}
 	}
-	return total, nil
+	return total, files, nil
 }
 
 // --- Public transfer API (called from app.go Wails bindings) ---
@@ -1065,39 +1201,7 @@ func (s *SCPSession) Get(remotePath, localPath string, recursive bool) (string, 
 		lp = filepath.Join(s.localCwd, lp)
 	}
 	if recursive {
-		total, err := s.dirSizeRemote(rp)
-		if err != nil {
-			return "", err
-		}
-		task := &TransferTask{
-			ID:         s.nextTaskID("dl"),
-			Type:       "download",
-			LocalPath:  lp,
-			RemotePath: rp,
-			Total:      total,
-			Status:     "running",
-		}
-		task.start()
-		s.mu.Lock()
-		s.transfers[task.ID] = task
-		s.mu.Unlock()
-		s.emitTransferStart(task)
-		go func() {
-			defer func() {
-				task.done()
-				s.mu.Lock()
-				delete(s.transfers, task.ID)
-				s.mu.Unlock()
-			}()
-			if err := s.scpFetchTree(rp, lp, task); err != nil {
-				task.Status = "error"
-				s.emitTransferEvent(task, err)
-				return
-			}
-			task.Status = "done"
-			s.emitTransferComplete(task)
-		}()
-		return task.ID, nil
+		return s.startSCPTree("download", lp, rp, nil)
 	}
 	task := &TransferTask{
 		ID:         s.nextTaskID("dl"),
@@ -1123,42 +1227,7 @@ func (s *SCPSession) Put(localPath, remotePath string, recursive bool) (string, 
 		rp = path.Join(s.getCwd(), rp)
 	}
 	if recursive {
-		total, err := s.dirSizeLocal(lp)
-		if err != nil {
-			return "", err
-		}
-		if err := s.mkdirAllRemote(rp); err != nil {
-			return "", err
-		}
-		task := &TransferTask{
-			ID:         s.nextTaskID("ul"),
-			Type:       "upload",
-			LocalPath:  lp,
-			RemotePath: rp,
-			Total:      total,
-			Status:     "running",
-		}
-		task.start()
-		s.mu.Lock()
-		s.transfers[task.ID] = task
-		s.mu.Unlock()
-		s.emitTransferStart(task)
-		go func() {
-			defer func() {
-				task.done()
-				s.mu.Lock()
-				delete(s.transfers, task.ID)
-				s.mu.Unlock()
-			}()
-			if err := s.scpSendTree(lp, rp, task); err != nil {
-				task.Status = "error"
-				s.emitTransferEvent(task, err)
-				return
-			}
-			task.Status = "done"
-			s.emitTransferComplete(task)
-		}()
-		return task.ID, nil
+		return s.startSCPTree("upload", lp, rp, nil)
 	}
 	task := &TransferTask{
 		ID:         s.nextTaskID("ul"),
@@ -1171,18 +1240,101 @@ func (s *SCPSession) Put(localPath, remotePath string, recursive bool) (string, 
 	return task.ID, nil
 }
 
+// startSCPTree launches a recursive upload/download with per-file tracking
+// and an optional retry skip-list, mirroring SFTP's startDirTransfer. The scp
+// protocol streams a whole tree over one exec channel, so files transfer
+// sequentially inside the walk (no worker pool). The returned task is
+// retained in s.transfers on failure (retryable); it is removed when done or
+// cancelled.
+func (s *SCPSession) startSCPTree(tfType, lp, rp string, skip []string) (string, error) {
+	var total int64
+	var files int
+	var err error
+	if tfType == "download" {
+		total, files, err = s.dirStatsRemote(rp)
+	} else {
+		total, files, err = s.dirStatsLocal(lp)
+	}
+	if err != nil {
+		return "", err
+	}
+	if tfType == "upload" {
+		if err := s.mkdirAllRemote(rp); err != nil {
+			return "", err
+		}
+	}
+	task := &TransferTask{
+		ID:         s.nextTaskID(map[bool]string{true: "dl", false: "ul"}[tfType == "download"]),
+		Type:       tfType,
+		LocalPath:  lp,
+		RemotePath: rp,
+		Status:     "running",
+	}
+	task.setTotal(total)
+	task.setFileCount(files)
+	if len(skip) > 0 {
+		task.SetSkip(skip)
+	}
+	task.start()
+	s.mu.Lock()
+	s.transfers[task.ID] = task
+	s.mu.Unlock()
+	s.emitTransferStart(task)
+	go func() {
+		defer task.done()
+		var derr error
+		if tfType == "download" {
+			derr = s.scpFetchTree(rp, lp, task)
+		} else {
+			derr = s.scpSendTree(lp, rp, task)
+		}
+		task.fileMu.RLock()
+		failed := task.FailedFiles
+		task.fileMu.RUnlock()
+		if task.ctx.Err() != nil {
+			// Cancelled takes precedence over any per-file failures.
+			task.Status = "cancelled"
+			s.emitTransferComplete(task)
+			s.mu.Lock()
+			delete(s.transfers, task.ID)
+			s.mu.Unlock()
+			return
+		}
+		if derr != nil && len(failed) == 0 {
+			// Walk-level failure (e.g. tree scan) with nothing attempted.
+			task.Status = "error"
+			s.emitTransferEvent(task, derr)
+			return // kept in s.transfers for retry
+		}
+		if len(failed) > 0 {
+			task.Status = "error"
+			s.emitTransferComplete(task)
+			return // kept for retry
+		}
+		task.Status = "done"
+		s.emitTransferProgressForced(task)
+		s.emitTransferComplete(task)
+		s.mu.Lock()
+		delete(s.transfers, task.ID)
+		s.mu.Unlock()
+	}()
+	return task.ID, nil
+}
+
 func (s *SCPSession) startTransfer(task *TransferTask) {
 	task.start()
 	s.mu.Lock()
 	s.transfers[task.ID] = task
 	s.mu.Unlock()
 	go func() {
-		defer func() {
-			task.done()
+		// The task is deleted from s.transfers only when done or cancelled;
+		// on error it is retained so a later retry can resume it.
+		removeTask := func() {
 			s.mu.Lock()
 			delete(s.transfers, task.ID)
 			s.mu.Unlock()
-		}()
+		}
+		defer task.done()
 		task.Status = "running"
 		s.emitTransferStart(task)
 
@@ -1193,6 +1345,7 @@ func (s *SCPSession) startTransfer(task *TransferTask) {
 			case <-task.ctx.Done():
 				task.Status = "cancelled"
 				s.emitTransferComplete(task)
+				removeTask()
 				return
 			}
 		}
@@ -1201,27 +1354,25 @@ func (s *SCPSession) startTransfer(task *TransferTask) {
 		if task.Type == "download" {
 			localFile, e := os.Create(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
 			defer localFile.Close()
 			err = s.scpFetchFile(task.RemotePath, localFile, task,
-				func(size int64) { task.Total = size },
+				func(size int64) { task.setTotal(size) },
 				func(n int64) {
-					task.Progress += n
+					task.addProgress(n)
 					s.emitTransferProgress(task)
 				})
 		} else {
 			fi, e := os.Stat(task.LocalPath)
 			if e != nil {
-				task.Status = "error"
 				s.emitTransferEvent(task, e)
 				return
 			}
-			task.Total = fi.Size()
+			task.setTotal(fi.Size())
 			err = s.scpSendFile(task.LocalPath, task.RemotePath, task, func(n int64) {
-				task.Progress += n
+				task.addProgress(n)
 				s.emitTransferProgress(task)
 			})
 		}
@@ -1229,14 +1380,15 @@ func (s *SCPSession) startTransfer(task *TransferTask) {
 			if task.ctx.Err() != nil {
 				task.Status = "cancelled"
 				s.emitTransferComplete(task)
+				removeTask()
 				return
 			}
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
-			return
+			return // retained in s.transfers for retry
 		}
 		task.Status = "done"
 		s.emitTransferComplete(task)
+		removeTask()
 	}()
 }
 
@@ -1316,6 +1468,35 @@ func (s *SCPSession) nextTaskID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, atomic.AddInt64(&s.taskSeq, 1))
 }
 
+// RetryTransfer (re)starts a transfer from a frontend-held checkpoint. For
+// recursive transfers, files listed in skipCompleted (paths relative to the
+// transfer root, '/'-separated) are counted as done without re-transferring.
+// Same contract as SFTPSession.RetryTransfer: *SCPSession satisfies the
+// app-layer transferRetry capability interface.
+func (s *SCPSession) RetryTransfer(spec TransferSpec, skipCompleted []string) (string, error) {
+	if err := s.requireConnected(); err != nil {
+		return "", err
+	}
+	if spec.Recursive {
+		if spec.Type == "download" {
+			return s.startSCPTree("download", spec.LocalPath, spec.RemotePath, skipCompleted)
+		}
+		return s.startSCPTree("upload", spec.LocalPath, spec.RemotePath, skipCompleted)
+	}
+	if spec.Type == "download" {
+		return s.Get(spec.RemotePath, spec.LocalPath, false)
+	}
+	return s.Put(spec.LocalPath, spec.RemotePath, false)
+}
+
+// DismissTransfer drops a retained (failed) task from the transfers map.
+func (s *SCPSession) DismissTransfer(taskID string) error {
+	s.mu.Lock()
+	delete(s.transfers, taskID)
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *SCPSession) CancelTransfer(taskID string) error {
 	s.mu.Lock()
 	task, ok := s.transfers[taskID]
@@ -1336,12 +1517,15 @@ func (s *SCPSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
-	s.emitTransferComplete(task)
+	s.emitTransferPaused(task)
 	return nil
 }
 
+// ResumeTransfer resumes a paused transfer task. It is rejected unless the
+// task is actually paused ("task not active"), so a stale or finished task
+// cannot be resumed into a bogus running state.
 func (s *SCPSession) ResumeTransfer(taskID string) error {
 	s.mu.Lock()
 	task, ok := s.transfers[taskID]
@@ -1349,64 +1533,13 @@ func (s *SCPSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	if task.Status != "paused" {
+		return fmt.Errorf("task not active: %s", taskID)
+	}
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})
-	s.emitTransferStart(task)
+	s.emitTransferResumed(task)
 	return nil
-}
-
-// --- Transfer event emitters (same wire format as the other backends) ---
-
-func (s *SCPSession) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
 }

@@ -2,58 +2,96 @@
   <div
     ref="panelRef"
     class="transfer-panel"
-    :style="resizable && height != null ? { height: height + 'px' } : undefined"
+    :class="{ 'transfer-panel-collapsed': collapsed }"
+    :style="resizable && !collapsed && height != null ? { height: height + 'px' } : undefined"
   >
-    <div v-if="resizable" class="transfer-panel-resize" @mousedown.prevent="onResizeStart" />
+    <div v-if="resizable && !collapsed" class="transfer-panel-resize" @mousedown.prevent="onResizeStart" />
     <div class="transfer-panel-head">
       <div class="transfer-panel-actions">
+        <!-- Collapse toggle: pinned far left; collapsing hides ONLY the task
+             list — this button bar stays so the panel can be re-expanded. -->
+        <button
+          class="filter-icon-btn"
+          :title="collapsed ? t('sftp.transferPanel.show') : t('sftp.transferPanel.hide')"
+          @click="emit('update:collapsed', !collapsed)"
+        ><el-icon><ChevronDown v-if="!collapsed" :size="14" /><ChevronUp v-else :size="14" /></el-icon></button>
         <span v-if="title" class="transfer-panel-title">{{ title }}</span>
+      </div>
+      <div class="transfer-panel-actions">
+        <slot name="actions" />
         <button
           class="filter-icon-btn"
           :disabled="!hasFinished"
           :title="t('companion.clearTransfers')"
           @click="emit('clearCompleted')"
         ><el-icon><BrushCleaning :size="14" /></el-icon></button>
-      </div>
-      <div class="transfer-panel-actions">
-        <slot name="actions" />
+        <slot name="actions-end" />
       </div>
     </div>
-    <div v-if="!tasks.length" class="transfer-empty">{{ t('companion.noTransfers') }}</div>
-    <div v-else class="transfer-progress-bar">
-      <div v-for="task in tasks" :key="task.id" class="transfer-task">
-        <span class="task-type"><ArrowUp v-if="task.type === 'upload'" :size="12" /><ArrowDown v-else :size="12" /></span>
-        <span class="task-name">{{ task.name }}</span>
-        <span class="task-eta" v-if="task.eta">{{ task.eta }}</span>
-        <span class="task-speed" v-if="task.status === 'running' || task.status === 'paused'">{{ task.speed || '--' }}</span>
-        <el-progress
-          :percentage="task.percentage"
-          :status="task.status === 'error' ? 'exception' : task.status === 'cancelled' ? 'warning' : undefined"
-          :stroke-width="4"
-          style="flex: 1"
-        />
-        <div class="task-actions">
-          <button
-            v-if="task.status === 'running'"
-            class="btn btn-ghost btn-icon btn-sm"
-            :title="t('sftp.pauseTransfer')"
-            @click="emit('pause', task.id)"
-          ><Pause :size="14" /></button>
-          <button
-            v-else-if="task.status === 'paused'"
-            class="btn btn-ghost btn-icon btn-sm"
-            :title="t('sftp.resumeTransfer')"
-            @click="emit('resume', task.id)"
-          ><Play :size="14" /></button>
-          <button
-            v-if="task.status === 'running' || task.status === 'paused'"
-            class="btn btn-ghost btn-icon btn-sm danger"
-            :title="t('sftp.cancelTransfer')"
-            @click="emit('cancel', task.id)"
-          ><X :size="14" /></button>
-          <span v-else-if="task.status === 'cancelled'" class="status-text">{{ t('sftp.cancelled') }}</span>
-          <span v-else-if="task.status === 'done'" class="status-text done" :title="t('sftp.done')"><Check :size="14" /></span>
-          <span v-else-if="task.status === 'error'" class="status-text error">{{ t('sftp.error') }}</span>
+    <div v-if="!collapsed && !tasks.length" class="transfer-empty">{{ t('companion.noTransfers') }}</div>
+    <div v-else-if="!collapsed" class="transfer-progress-bar">
+      <div v-for="task in tasks" :key="task.id" class="transfer-task-wrap">
+        <div class="transfer-task">
+          <span class="task-type"><ArrowUp v-if="task.type === 'upload'" :size="12" /><ArrowDown v-else :size="12" /></span>
+          <span
+            class="task-name"
+            :class="{ clickable: task.files.length > 0 }"
+            :title="task.files.length > 0 ? (expanded[task.id] ? t('sftp.hideFiles') : t('sftp.showFiles')) : undefined"
+            @click="toggleExpand(task)"
+          >{{ task.name }}<span v-if="task.fileCount > 0" class="task-dir-detail">{{ task.completedFiles }}/{{ task.fileCount }}</span></span>
+          <span class="task-eta" v-if="task.eta">{{ task.eta }}</span>
+          <span class="task-speed" v-if="task.status === 'running' || task.status === 'paused'">{{ task.speed || '--' }}</span>
+          <el-progress
+            :percentage="task.percentage"
+            :status="task.status === 'error' ? 'exception' : task.status === 'cancelled' ? 'warning' : undefined"
+            :stroke-width="4"
+            style="flex: 1"
+          />
+          <div class="task-actions">
+            <button
+              v-if="task.status === 'running'"
+              class="btn btn-ghost btn-icon btn-sm"
+              :title="t('sftp.pauseTransfer')"
+              @click="emit('pause', task.id)"
+            ><Pause :size="14" /></button>
+            <button
+              v-else-if="task.status === 'paused'"
+              class="btn btn-ghost btn-icon btn-sm"
+              :title="t('sftp.resumeTransfer')"
+              @click="emit('resume', task.id)"
+            ><Play :size="14" /></button>
+            <button
+              v-if="task.status === 'running' || task.status === 'paused'"
+              class="btn btn-ghost btn-icon btn-sm danger"
+              :title="t('sftp.cancelTransfer')"
+              @click="emit('cancel', task.id)"
+            ><X :size="14" /></button>
+            <button
+              v-if="task.status === 'error'"
+              class="btn btn-ghost btn-icon btn-sm"
+              :title="t('sftp.retryTransfer')"
+              @click="emit('retry', task)"
+            ><RotateCcw :size="14" /></button>
+            <span v-else-if="task.status === 'cancelled'" class="status-text">{{ t('sftp.cancelled') }}</span>
+            <span v-else-if="task.status === 'done'" class="status-text done" :title="t('sftp.done')"><Check :size="14" /></span>
+            <span v-if="task.status === 'error'" class="status-text error">{{ t('sftp.error') }}</span>
+          </div>
+        </div>
+        <div
+          v-if="expanded[task.id] && task.files.length > 0"
+          class="task-files"
+          :title="t('sftp.fileProgress')"
+        >
+          <div
+            v-for="f in task.files.slice(-200)"
+            :key="f.path"
+            class="task-file"
+            :class="'f-' + f.status"
+          >
+            <span class="task-file-name">{{ f.path }}</span>
+            <span class="task-file-status">{{ t('sftp.fileStatus.' + f.status) }}</span>
+          </div>
+          <div v-if="task.files.length > 200" class="task-file-more">…</div>
         </div>
       </div>
     </div>
@@ -61,8 +99,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { X, Pause, Play, ArrowUp, ArrowDown, Check, BrushCleaning } from '@lucide/vue'
+import { ref, reactive, computed } from 'vue'
+import { X, Pause, Play, ArrowUp, ArrowDown, Check, RotateCcw, BrushCleaning, ChevronUp, ChevronDown } from '@lucide/vue'
 import { useI18n } from '../i18n'
 import type { TransferTaskUI } from '../stores/panelStore'
 
@@ -71,18 +109,30 @@ const props = defineProps<{
   height?: number
   resizable?: boolean
   title?: string
+  /** Collapsed = only the button bar is shown; the task list is hidden. */
+  collapsed?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'cancel', taskId: string): void
   (e: 'pause', taskId: string): void
   (e: 'resume', taskId: string): void
+  (e: 'retry', task: TransferTaskUI): void
   (e: 'clearCompleted'): void
   (e: 'update:height', h: number): void
+  (e: 'update:collapsed', v: boolean): void
 }>()
 
 const { t } = useI18n()
 const panelRef = ref<HTMLElement | null>(null)
+
+// Which tasks have their per-file detail expanded (directory transfers).
+const expanded = reactive<Record<string, boolean>>({})
+
+function toggleExpand(task: TransferTaskUI) {
+  if (task.files.length === 0) return
+  expanded[task.id] = !expanded[task.id]
+}
 
 const hasFinished = computed(() =>
   props.tasks.some(t => t.status === 'done' || t.status === 'error' || t.status === 'cancelled')
@@ -115,6 +165,10 @@ function onResizeStart(e: MouseEvent) {
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-elevated);
   flex-shrink: 0;
+}
+/* Collapsed: only the button bar remains — no reserved body height. */
+.transfer-panel-collapsed {
+  min-height: 0;
 }
 .transfer-panel-resize {
   height: 4px;
@@ -213,6 +267,48 @@ function onResizeStart(e: MouseEvent) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.task-name.clickable {
+  cursor: pointer;
+}
+.task-name.clickable:hover {
+  color: var(--text-primary);
+}
+.task-dir-detail {
+  margin-left: 4px;
+  color: var(--text-disabled);
+}
+.task-files {
+  padding: 2px 0 4px 18px;
+}
+.task-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 16px;
+  font-size: 10px;
+  line-height: 1;
+  font-family: var(--font-mono);
+}
+.task-file-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-file-status {
+  flex-shrink: 0;
+  color: var(--text-disabled);
+}
+.task-file.f-done .task-file-status {
+  color: var(--accent);
+}
+.task-file.f-failed .task-file-status {
+  color: var(--error);
+}
+.task-file-more {
+  font-size: 10px;
+  color: var(--text-disabled);
 }
 .task-eta {
   font-size: 10px;

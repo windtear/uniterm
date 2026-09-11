@@ -48,6 +48,10 @@ export const useCompanionStore = defineStore('companion', () => {
   const entries = ref<Record<string, CompanionEntry>>({})
   const fileViewCache = ref<Record<string, FileViewCache>>({})
   const monitorViewCache = ref<Record<string, MonitorViewCache>>({})
+  // Per-files-panel "follow terminal path" flag (sidebar navigates when the
+  // terminal's shell reports a cwd change). Ephemeral by design: never
+  // persisted, resets with the session.
+  const followPathByPanel = ref<Record<string, boolean>>({})
 
   const panelStore = usePanelStore()
   const sessionStore = useSessionStore()
@@ -280,6 +284,13 @@ export const useCompanionStore = defineStore('companion', () => {
     await ensureMonitor(pid)
   }
 
+  // Follow-terminal-path is DEFAULT-ON: the record only ever stores an
+  // explicit `false` (user turned it off); absence means enabled.
+  function toggleFollowPath(panelId: string) {
+    const next = followPathByPanel.value[panelId] === false
+    followPathByPanel.value = { ...followPathByPanel.value, [panelId]: next }
+  }
+
   async function disposeForPanel(sshPanelId: string) {
     const entry = entries.value[sshPanelId]
     // Drop companion view caches together with the panel's sessions.
@@ -289,6 +300,7 @@ export const useCompanionStore = defineStore('companion', () => {
     if (monitorViewCache.value[sshPanelId]) {
       delete monitorViewCache.value[sshPanelId]
     }
+    delete followPathByPanel.value[sshPanelId]
     if (!entry) return
     const sftpId = entry.sftpSessionId
     const monitorId = entry.monitorSessionId
@@ -335,6 +347,7 @@ export const useCompanionStore = defineStore('companion', () => {
     filesWidth,
     monitorWidth,
     entries,
+    followPathByPanel,
     activeSshPanelId,
     activeFilesPanelId,
     sshConnected,
@@ -358,5 +371,6 @@ export const useCompanionStore = defineStore('companion', () => {
     setFileViewCache,
     getMonitorViewCache,
     setMonitorViewCache,
+    toggleFollowPath,
   }
 })

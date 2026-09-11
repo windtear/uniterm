@@ -2,7 +2,6 @@ package session
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -639,7 +638,6 @@ func (s *S3Session) Get(remotePath, localPath string, recursive bool) (string, e
 			err = s.downloadFile(task, rp, lp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -687,7 +685,6 @@ func (s *S3Session) Put(localPath, remotePath string, recursive bool) (string, e
 			err = s.uploadFile(task, lp, rp)
 		}
 		if err != nil {
-			task.Status = "error"
 			s.emitTransferEvent(task, err)
 			return
 		}
@@ -717,7 +714,7 @@ func (s *S3Session) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
 	s.emitTransferComplete(task)
 	return nil
@@ -730,7 +727,7 @@ func (s *S3Session) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})
@@ -801,9 +798,9 @@ func calcLocalDirSize(localDir string) (int64, error) {
 
 func (s *S3Session) downloadDir(remoteDir, localDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := s.calcRemoteDirSize(remoteDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -863,14 +860,14 @@ func (s *S3Session) downloadDir(remoteDir, localDir string, task *TransferTask) 
 
 func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath string) error {
 	// Get file size first for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		details, err := s.s3.FileDetails(simples3.DetailsInput{
 			Bucket:    s.bucket,
 			ObjectKey: s.s3Key(remotePath),
 		})
 		if err == nil && details.ContentLength != "" {
 			if size, parseErr := strconv.ParseInt(details.ContentLength, 10, 64); parseErr == nil {
-				task.Total = size
+				task.setTotal(size)
 			}
 		}
 	}
@@ -901,7 +898,7 @@ func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath strin
 		n, e := rc.Read(buf)
 		if n > 0 {
 			dst.Write(buf[:n])
-			task.Progress += int64(n)
+			task.addProgress(int64(n))
 			s.emitTransferProgress(task)
 		}
 		if e != nil {
@@ -915,9 +912,9 @@ func (s *S3Session) downloadFile(task *TransferTask, remotePath, localPath strin
 
 func (s *S3Session) uploadDir(localDir, remoteDir string, task *TransferTask) error {
 	// Calculate total size for progress tracking
-	if task.Total <= 0 {
+	if task.loadTotal() <= 0 {
 		if total, err := calcLocalDirSize(localDir); err == nil {
-			task.Total = total
+			task.setTotal(total)
 		}
 	}
 
@@ -988,65 +985,12 @@ func (s *S3Session) uploadFile(task *TransferTask, localPath, remotePath string)
 		Body:        bytes.NewReader(data),
 	})
 	if err == nil {
-		task.Progress += int64(len(data))
-		if task.Total == 0 {
-			task.Total = int64(len(data))
+		task.addProgress(int64(len(data)))
+		if task.loadTotal() == 0 {
+			task.setTotal(int64(len(data)))
 		}
 		s.emitTransferProgress(task)
 	}
 	return err
 }
 
-// --- Transfer event emitters ---
-
-func (s *S3Session) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *S3Session) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *S3Session) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *S3Session) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
