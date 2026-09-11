@@ -13,6 +13,15 @@
        
         clearable
       />
+      <button class="filter-icon-btn" :disabled="!canBack" @click="emit('back')" :title="t('sftp.back')">
+        <el-icon><ChevronLeft :size="14" /></el-icon>
+      </button>
+      <button class="filter-icon-btn" :disabled="!canForward" @click="emit('forward')" :title="t('sftp.forward')">
+        <el-icon><ChevronRight :size="14" /></el-icon>
+      </button>
+      <button class="filter-icon-btn" @click="emit('up')" :title="t('sftp.goUp')">
+        <el-icon><CornerLeftUp :size="14" /></el-icon>
+      </button>
       <button class="filter-icon-btn" @click="emit('refresh')" :title="t('sftp.refresh')">
         <el-icon><RefreshCw :size="14" /></el-icon>
       </button>
@@ -183,7 +192,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Folder, File, Link, RefreshCw, Eye, Upload, MoreHorizontal } from '@lucide/vue'
+import { Folder, File, Link, RefreshCw, Eye, Upload, MoreHorizontal, ChevronLeft, ChevronRight, CornerLeftUp } from '@lucide/vue'
 import { useI18n } from '../i18n'
 import PathBreadcrumb from './PathBreadcrumb.vue'
 import Menu from './Menu.vue'
@@ -217,6 +226,10 @@ const props = defineProps<{
   breadcrumbPath?: string
   breadcrumbSavedPaths?: string[]
   breadcrumbDrives?: string[]
+  /** Whether history navigation has a previous / next directory. The back and
+   *  forward buttons are disabled when omitted (hosts without history). */
+  canBack?: boolean
+  canForward?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -242,6 +255,9 @@ const emit = defineEmits<{
   clearClipboard: []
   saveBookmark: [path: string]
   removeBookmark: [path: string]
+  back: []
+  forward: []
+  up: []
 }>()
 
 const { t, locale } = useI18n()
@@ -796,6 +812,12 @@ function applyBandSelection() {
 .filter-icon-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+.filter-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  color: var(--text-muted);
 }
 .filter-icon-btn.active {
   color: var(--accent);

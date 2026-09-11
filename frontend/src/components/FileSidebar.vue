@@ -36,6 +36,11 @@
           :clipboard-count="clipboardCount"
           :clipboard-mode="clipboard?.mode"
           @navigate="onNavigate"
+          :can-back="canBack"
+          :can-forward="canForward"
+          @back="onBack"
+          @forward="onForward"
+          @up="onUp"
           @refresh="onRefresh"
           @upload="onUpload"
           @download-to="onDownloadTo"
@@ -227,7 +232,8 @@ const listing = useFileListing({
     return false
   },
 })
-const { cwd, files, loading, onRefresh, onNavigate, onCancelLoad } = listing
+const { cwd, files, loading, onRefresh, onNavigate, onCancelLoad,
+  canBack, canForward, onBack, onForward, onUp } = listing
 
 // Shared dialog + conflict plumbing and the per-panel file actions live in
 // the useFilePanel composable (same implementation as the SFTP tab's panes).

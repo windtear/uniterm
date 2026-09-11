@@ -23,6 +23,11 @@
           :cut-item-names="localCutItemNames"
           :clipboard-count="localClipboardCount"
           :clipboard-mode="localClipboard?.mode"
+          :can-back="localCanBack"
+          :can-forward="localCanForward"
+          @back="onLocalBack"
+          @forward="onLocalForward"
+          @up="onLocalUp"
           @navigate="onLocalNavigate"
           @send-to-other="onSendToRemote"
           @rename="onLocalRename"
@@ -66,6 +71,11 @@
           :cut-item-names="cutItemNames"
           :clipboard-count="clipboardCount"
           :clipboard-mode="clipboard?.mode"
+          :can-back="remoteCanBack"
+          :can-forward="remoteCanForward"
+          @back="onRemoteBack"
+          @forward="onRemoteForward"
+          @up="onRemoteUp"
           @navigate="onRemoteNavigate"
           @send-to-other="onSendToLocal"
           @rename="onRename"
@@ -267,10 +277,14 @@ const localListing = useFileListing({
 const {
   cwd, files: remoteFiles, loading: loadingRemote,
   onRefresh: onRefreshRemote, onNavigate: onRemoteNavigate, onCancelLoad: onCancelLoadRemote,
+  canBack: remoteCanBack, canForward: remoteCanForward,
+  onBack: onRemoteBack, onForward: onRemoteForward, onUp: onRemoteUp,
 } = remoteListing
 const {
   cwd: localCwd, files: localFiles, loading: loadingLocal,
   onRefresh: onRefreshLocal, onNavigate: onLocalNavigate, onCancelLoad: onCancelLoadLocal,
+  canBack: localCanBack, canForward: localCanForward,
+  onBack: onLocalBack, onForward: onLocalForward, onUp: onLocalUp,
 } = localListing
 
 // Auto-reconnect when a remote listing/navigation hits a dead session (used to
