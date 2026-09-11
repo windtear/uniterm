@@ -64,10 +64,6 @@
       <el-button type="primary" @click="emit('paste')">{{ t('sftp.paste') }}</el-button>
       <el-button @click="emit('clearClipboard')">{{ t('sftp.dialog.cancel') }}</el-button>
     </div>
-    <div v-if="selectionStats.count > 0" class="selection-bar">
-      <span class="selection-info">{{ t('sftp.selectionStats', { count: selectionStats.count }) }}</span>
-      <span v-if="selectionStats.size > 0">{{ formatSize(selectionStats.size) }}</span>
-    </div>
     <div class="table-wrapper" @contextmenu.prevent="onEmptyAreaContextMenu" @mousedown="onTableMouseDown">
       <div v-if="loading || pasteLoading" class="loading-overlay">
         <div class="loading-content">
@@ -135,6 +131,10 @@
       class="band-rect"
       :style="{ left: bandRect.x + 'px', top: bandRect.y + 'px', width: bandRect.w + 'px', height: bandRect.h + 'px' }"
     />
+    </div>
+    <div v-if="selectionStats.count > 0" class="selection-bar">
+      <span class="selection-info">{{ t('sftp.selectionStats', { count: selectionStats.count }) }}</span>
+      <span v-if="selectionStats.size > 0">{{ formatSize(selectionStats.size) }}</span>
     </div>
 
     <Menu ref="ctxMenuRef" v-model:visible="ctxMenuVisible" @contextmenu.stop v-slot="{ current }">
@@ -899,7 +899,7 @@ function applyBandSelection() {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-secondary);
 }
