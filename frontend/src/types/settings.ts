@@ -235,6 +235,10 @@ export interface AppSettings {
   ai: AISettings
   keyboard: KeyboardSettings
   autoCheckUpdate: boolean
+  // Update source for checks and downloads: "auto" picks by UI language with
+  // cross-source fallback; "github" forces the official source; "gitee"
+  // forces the domestic mirror.
+  updateSource: 'auto' | 'github' | 'gitee'
   closeTabPrompt: boolean
   closeAppPrompt: boolean
   sftpBookmarks: SFTPBookmarks
@@ -320,6 +324,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   keyboard: { ...DEFAULT_KEYBOARD },
   autoCheckUpdate: true,
+  updateSource: 'auto',
   closeTabPrompt: true,
   closeAppPrompt: true,
   sftpBookmarks: {
@@ -428,9 +433,18 @@ export const LANGUAGE_OPTIONS: { value: Locale; label: string; native: string }[
   { value: 'ru', label: 'Русский', native: 'Русский' },
 ]
 
+export interface UpdateAsset {
+  name: string
+  url: string
+  sha256: string
+  source: 'github' | 'gitee'
+}
+
 export interface UpdateInfo {
   hasUpdate: boolean
   current: string
   latest: string
   releaseUrl: string
+  changelog: string
+  assets: UpdateAsset[]
 }
