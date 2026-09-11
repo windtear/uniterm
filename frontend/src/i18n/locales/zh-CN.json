@@ -284,6 +284,8 @@
   "sftp.retryTransfer": "重试",
   "sftp.showFiles": "显示文件",
   "sftp.hideFiles": "隐藏文件",
+  "sftp.transferPanel.show": "显示传输",
+  "sftp.transferPanel.hide": "隐藏传输",
   "sftp.fileProgress": "文件",
   "sftp.fileStatus.running": "传输中",
   "sftp.fileStatus.done": "已完成",

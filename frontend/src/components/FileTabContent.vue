@@ -107,6 +107,7 @@
       </div>
     </div>
     <TransferPanel
+      v-show="settingsStore.sftpTransferPanelVisible"
       v-model:height="transferHeight"
       resizable
       :tasks="transferTasks"
@@ -115,7 +116,15 @@
       @resume="onResumeTransfer"
       @retry="onRetryTransfer"
       @clearCompleted="clearFinishedTransfers"
-    />
+    >
+      <template #actions>
+        <button
+          class="filter-icon-btn"
+          :title="t('sftp.transferPanel.hide')"
+          @click="toggleTransferPanel"
+        ><el-icon><ChevronDown :size="14" /></el-icon></button>
+      </template>
+    </TransferPanel>
 
     <!-- Custom Dialog (shared) -->
     <FileGenericDialog
@@ -193,6 +202,7 @@ import { queuedSessionWrite } from '../services/sessionWriter'
 import type { PanelType } from '../types/workspace'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
+import { ChevronDown } from '@lucide/vue'
 import { useTransferTaskEvents } from '../composables/useTransferTasks'
 
 const props = defineProps<{
@@ -436,6 +446,28 @@ watch(() => panel.value?.sessionId, async (newId, oldId) => {
     await probeConnectAndLoad()
   }
 }, { immediate: true })
+
+// Transfer panel visibility: hidden by default; a NEW task id auto-pops it
+// (a manual collapse only hides the panel until the next task starts). The
+// persisted flag remembers the last visibility across restarts but never
+// suppresses the auto-pop.
+const seenTransferTaskIds = new Set<string>()
+watch(() => transferTasks.map(t => t.id).join('|'), () => {
+  let hasNewTask = false
+  for (const task of transferTasks) {
+    if (!seenTransferTaskIds.has(task.id)) {
+      seenTransferTaskIds.add(task.id)
+      hasNewTask = true
+    }
+  }
+  if (hasNewTask && !settingsStore.sftpTransferPanelVisible) {
+    settingsStore.sftpTransferPanelVisible = true
+  }
+})
+
+function toggleTransferPanel() {
+  settingsStore.sftpTransferPanelVisible = !settingsStore.sftpTransferPanelVisible
+}
 
 // A fast-connecting session (e.g. S3) can emit session:status 'connected' before
 // this panel binds its sessionId, so the connected-event handler and a mount-time

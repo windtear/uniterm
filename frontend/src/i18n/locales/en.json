@@ -284,6 +284,8 @@
   "sftp.retryTransfer": "Retry",
   "sftp.showFiles": "Show files",
   "sftp.hideFiles": "Hide files",
+  "sftp.transferPanel.show": "Show transfers",
+  "sftp.transferPanel.hide": "Hide transfers",
   "sftp.fileProgress": "Files",
   "sftp.fileStatus.running": "transferring",
   "sftp.fileStatus.done": "done",

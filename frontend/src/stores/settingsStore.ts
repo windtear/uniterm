@@ -172,6 +172,18 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const sftpBookmarks = computed(() => settings.value.sftpBookmarks)
 
+  // Writable computed so components can toggle visibility directly; every
+  // write is persisted with the settings blob. The transfer panel auto-pops
+  // on new tasks regardless of this flag — it only remembers the last
+  // visibility across restarts.
+  const sftpTransferPanelVisible = computed<boolean>({
+    get: () => settings.value.sftpTransferPanelVisible,
+    set: (v: boolean) => {
+      settings.value.sftpTransferPanelVisible = v
+      save()
+    }
+  })
+
   function addSftpBookmark(mode: 'local' | 'remote', path: string) {
     const key = mode === 'local' ? 'localPaths' : 'remotePaths'
     const paths = settings.value.sftpBookmarks[key]
@@ -247,6 +259,7 @@ export const useSettingsStore = defineStore('settings', () => {
     removeModel,
     setActiveModel,
     sftpBookmarks,
+    sftpTransferPanelVisible,
     addSftpBookmark,
     removeSftpBookmark,
     addCustomTheme,
@@ -283,6 +296,7 @@ function mergeSettings(loaded: AppSettings): AppSettings {
       localPaths: loaded.sftpBookmarks?.localPaths || [],
       remotePaths: loaded.sftpBookmarks?.remotePaths || []
     },
+    sftpTransferPanelVisible: loaded.sftpTransferPanelVisible ?? DEFAULT_SETTINGS.sftpTransferPanelVisible,
     customTerminalThemes: loaded.customTerminalThemes || [],
     defaultLocalShell: loaded.defaultLocalShell ?? DEFAULT_SETTINGS.defaultLocalShell,
     tabCloseButton: loaded.tabCloseButton || DEFAULT_SETTINGS.tabCloseButton,

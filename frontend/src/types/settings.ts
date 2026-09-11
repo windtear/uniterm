@@ -223,6 +223,10 @@ export interface AppSettings {
   closeTabPrompt: boolean
   closeAppPrompt: boolean
   sftpBookmarks: SFTPBookmarks
+  // Whether the dual-pane SFTP tab's transfer panel starts out visible.
+  // The panel auto-pops on every new transfer task regardless of this flag;
+  // the flag only remembers the last visibility across restarts.
+  sftpTransferPanelVisible: boolean
   customTerminalThemes: CustomTerminalTheme[]
   defaultLocalShell: string
   // Which side of the tab the close (X) button sits on.
@@ -305,6 +309,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     localPaths: [],
     remotePaths: []
   },
+  sftpTransferPanelVisible: false,
   customTerminalThemes: [],
   defaultLocalShell: '',
   tabCloseButton: 'left',
