@@ -3,6 +3,11 @@ import { reactive } from 'vue'
 import type { Panel, PanelStatus, ConnectionConfig } from '../types/workspace'
 import { DisableSessionOutputLog, RegisterSessionForPanel, UnregisterSession } from '../../bindings/github.com/ys-ll/uniterm/app'
 
+export interface TransferFileState {
+  path: string
+  status: 'running' | 'done' | 'failed'
+}
+
 export interface TransferTaskUI {
   id: string
   type: 'upload' | 'download'
@@ -14,6 +19,12 @@ export interface TransferTaskUI {
   lastBytes: number
   lastTime: number
   total: number
+  // Directory-transfer detail (empty for single-file tasks).
+  fileCount: number
+  completedFiles: number
+  currentFile: string
+  files: TransferFileState[]
+  failedFiles: { path: string; error: string }[]
 }
 
 export interface VNCCache {

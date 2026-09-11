@@ -37,14 +37,9 @@ export function useTransferTaskEvents(
 
   function bind() {
     unbind()
-    unsub = Events.On('session:data', (ev) => {
-      const payload = ev?.data as { id: string; data: string }
-      if (!payload || payload.id !== getSessionId()) return
-      const match = payload.data.match(/\x1b\]633;S([^\x07]*)\x07/)
-      if (!match) return
-      let msg: any
-      try { msg = JSON.parse(match[1]) } catch { return }
-      if (msg?.type !== 'sftp:transfer') return
+    unsub = Events.On('sftp:transfer', (ev) => {
+      const msg = ev?.data as any
+      if (!msg || msg.type !== 'sftp:transfer' || msg.sessionId !== getSessionId()) return
       const tasks = getTasks()
 
       if (msg.event === 'start') {
@@ -67,6 +62,11 @@ export function useTransferTaskEvents(
             lastBytes: 0,
             lastTime: Date.now(),
             total: msg.total || 0,
+            fileCount: msg.fileCount || 0,
+            completedFiles: 0,
+            currentFile: '',
+            files: [],
+            failedFiles: [],
           })
           while (tasks.length > 80) tasks.shift()
         }
@@ -82,12 +82,34 @@ export function useTransferTaskEvents(
             const bytesPerSec = bytesSince / elapsed
             existing.speed = formatSpeed(bytesPerSec)
             if (bytesPerSec > 0 && existing.total > 0) {
-              const remaining = (existing.total - msg.progress) / bytesPerSec
-              existing.eta = formatETA(remaining)
+              existing.eta = formatETA((existing.total - msg.progress) / bytesPerSec)
             }
             existing.lastBytes = msg.progress
             existing.lastTime = now
           }
+        }
+      } else if (msg.event === 'file-start') {
+        const t = tasks.find(t => t.id === msg.taskId)
+        if (t) {
+          t.currentFile = msg.name || msg.file
+          t.files.push({ path: msg.file, status: 'running' })
+        }
+      } else if (msg.event === 'file-done') {
+        const t = tasks.find(t => t.id === msg.taskId)
+        if (t) {
+          const f = t.files.find((f: any) => f.path === msg.file)
+          if (f) f.status = 'done'
+          else t.files.push({ path: msg.file, status: 'done' })
+          t.completedFiles = msg.completedFiles ?? t.completedFiles
+          t.fileCount = msg.fileCount || t.fileCount
+        }
+      } else if (msg.event === 'file-failed') {
+        const t = tasks.find(t => t.id === msg.taskId)
+        if (t) {
+          const f = t.files.find((f: any) => f.path === msg.file)
+          if (f) f.status = 'failed'
+          else t.files.push({ path: msg.file, status: 'failed' })
+          t.failedFiles.push({ path: msg.file, error: msg.error })
         }
       } else if (msg.event === 'complete') {
         const existing = tasks.find(t => t.id === msg.taskId)
@@ -95,6 +117,7 @@ export function useTransferTaskEvents(
           const st = msg.status as string
           existing.status = st === 'done' ? 'done' : st === 'cancelled' ? 'cancelled' : st === 'paused' ? 'paused' : 'error'
           existing.percentage = existing.status === 'done' ? 100 : existing.percentage
+          if (msg.failedFiles) existing.failedFiles = msg.failedFiles
           onDone(existing.status, existing.type)
           // Finished tasks stay listed until the user clears them.
         }
