@@ -62,6 +62,40 @@ type fileTransferSession interface {
 	ResumeTransfer(taskID string) error
 }
 
+// transferRetry is implemented by backends that support retrying a failed
+// transfer from a frontend-held checkpoint (SFTP; SCP from Task 6). Optional
+// so the other protocol backends don't have to implement it yet.
+type transferRetry interface {
+	RetryTransfer(spec session.TransferSpec, skipCompleted []string) (string, error)
+	DismissTransfer(taskID string) error
+}
+
+// SftpRetryTransfer re-runs a failed transfer, skipping files the frontend
+// reports as already completed.
+func (a *App) SftpRetryTransfer(sessionID string, spec session.TransferSpec, skipCompleted []string) (string, error) {
+	fs, err := a.getSftp(sessionID)
+	if err != nil {
+		return "", err
+	}
+	r, ok := fs.(transferRetry)
+	if !ok {
+		return "", fmt.Errorf("retry not supported for this protocol")
+	}
+	return r.RetryTransfer(spec, skipCompleted)
+}
+
+// SftpDismissTransfer removes a retained failed task from the backend.
+func (a *App) SftpDismissTransfer(sessionID, taskID string) error {
+	fs, err := a.getSftp(sessionID)
+	if err != nil {
+		return err
+	}
+	if r, ok := fs.(transferRetry); ok {
+		return r.DismissTransfer(taskID)
+	}
+	return nil
+}
+
 func (a *App) getSftp(sid string) (fileTransferSession, error) {
 	if a.sessionManager == nil {
 		return nil, fmt.Errorf("session manager not initialized")

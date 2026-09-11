@@ -957,6 +957,33 @@ func (s *SFTPSession) Move(oldPath, newPath string) error {
 	return session.Run(fmt.Sprintf("mv -- %s %s", shellEscape(old), shellEscape(n)))
 }
 
+// RetryTransfer (re)starts a transfer from a frontend-held checkpoint. For
+// recursive transfers, files listed in skipCompleted (paths relative to the
+// transfer root, '/'-separated) are counted as done without re-transferring.
+func (s *SFTPSession) RetryTransfer(spec TransferSpec, skipCompleted []string) (string, error) {
+	if err := s.requireClient(); err != nil {
+		return "", err
+	}
+	if spec.Recursive {
+		if spec.Type == "download" {
+			return s.startDirTransfer("download", spec.LocalPath, spec.RemotePath, skipCompleted)
+		}
+		return s.startDirTransfer("upload", spec.LocalPath, spec.RemotePath, skipCompleted)
+	}
+	if spec.Type == "download" {
+		return s.Get(spec.RemotePath, spec.LocalPath, false)
+	}
+	return s.Put(spec.LocalPath, spec.RemotePath, false)
+}
+
+// DismissTransfer drops a retained (failed) task from the transfers map.
+func (s *SFTPSession) DismissTransfer(taskID string) error {
+	s.mu.Lock()
+	delete(s.transfers, taskID)
+	s.mu.Unlock()
+	return nil
+}
+
 // CancelTransfer cancels an ongoing transfer task.
 func (s *SFTPSession) CancelTransfer(taskID string) error {
 	s.mu.Lock()

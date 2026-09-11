@@ -299,3 +299,44 @@ func TestDirUploadHappyPath(t *testing.T) {
 		t.Fatalf("sub/c.txt = %q", got)
 	}
 }
+
+// TestRetryTransferSkipsCompletedFiles drives the retry path end to end: a
+// failed download retains its task, a retry with a skip list counts finished
+// files as done without re-transferring, and dismiss drops the retained task.
+func TestRetryTransferSkipsCompletedFiles(t *testing.T) {
+	s, root := newTestSFTPSession(t)
+	events := captureTransferEvents(t)
+	remote := filepath.Join(root, "src")
+	os.MkdirAll(remote, 0o755)
+	os.WriteFile(filepath.Join(remote, "a.txt"), []byte("A"), 0o644)
+	os.WriteFile(filepath.Join(remote, "b.txt"), []byte("B"), 0o644)
+	local := filepath.Join(root, "out")
+	os.MkdirAll(filepath.Join(local, "b.txt"), 0o755) // b.txt fails
+
+	id, _ := s.RetryTransfer(TransferSpec{Type: "download", LocalPath: local, RemotePath: remote, Recursive: true}, nil)
+	ev := waitForTask(t, events, id)
+	if ev["status"] != "error" || ev["completedFiles"] != 1 {
+		t.Fatalf("first attempt: status=%v completed=%v", ev["status"], ev["completedFiles"])
+	}
+	// Fix the blocker and retry, skipping a.txt (already done).
+	os.Remove(filepath.Join(local, "b.txt"))
+	id2, err := s.RetryTransfer(TransferSpec{Type: "download", LocalPath: local, RemotePath: remote, Recursive: true},
+		[]string{"a.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev2 := waitForTask(t, events, id2)
+	if ev2["status"] != "done" || ev2["completedFiles"] != 2 {
+		t.Fatalf("retry: status=%v completed=%v", ev2["status"], ev2["completedFiles"])
+	}
+	// Dismiss removes a retained failed task.
+	if err := s.DismissTransfer(id); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+	s.mu.RLock()
+	_, kept := s.transfers[id]
+	s.mu.RUnlock()
+	if kept {
+		t.Fatal("dismissed task still present")
+	}
+}
