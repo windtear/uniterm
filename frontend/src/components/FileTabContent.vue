@@ -193,7 +193,7 @@ import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/
 import { isConnectionLostError, supportsRemoteSymlink } from '../utils/fileTransferUtils'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
-import { useTransferTaskEvents } from '../composables/useTransferTasks'
+import { useTransferTaskEvents, watchNewTransferTasks } from '../composables/useTransferTasks'
 
 const props = defineProps<{
   panelId: string
@@ -441,19 +441,10 @@ watch(() => panel.value?.sessionId, async (newId, oldId) => {
 // (a manual collapse only hides the panel until the next task starts). The
 // persisted flag remembers the last visibility across restarts but never
 // suppresses the auto-pop.
-const seenTransferTaskIds = new Set<string>()
-watch(() => transferTasks.map(t => t.id).join('|'), () => {
-  let hasNewTask = false
-  for (const task of transferTasks) {
-    if (!seenTransferTaskIds.has(task.id)) {
-      seenTransferTaskIds.add(task.id)
-      hasNewTask = true
-    }
-  }
-  if (hasNewTask && !settingsStore.sftpTransferPanelVisible) {
-    settingsStore.sftpTransferPanelVisible = true
-  }
-})
+watchNewTransferTasks(
+  () => transferTasks,
+  () => { settingsStore.sftpTransferPanelVisible = true },
+)
 
 // A fast-connecting session (e.g. S3) can emit session:status 'connected' before
 // this panel binds its sessionId, so the connected-event handler and a mount-time
