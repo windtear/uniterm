@@ -705,7 +705,11 @@ onBeforeUnmount(() => {
 function onTableMouseDown(e: MouseEvent) {
   bandJustEnded = false
   if (bandCleanup) return
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
+  // Ctrl/Cmd starts an ADDITIVE band (existing selection kept, swept rows are
+  // added — applyBandSelection already unions with bandBaseSelection). Shift
+  // stays reserved for the row-click range toggle.
+  const additive = e.ctrlKey || e.metaKey
+  if (e.button !== 0 || e.shiftKey) return
   if (props.loading || props.pasteLoading) return
   const t = e.target as HTMLElement
   if (!t.closest) return
@@ -762,9 +766,9 @@ function onTableMouseDown(e: MouseEvent) {
     bandWrapper = null
     bandRows = []
     bandJustEnded = wasBand
-    if (!wasBand && !bandDownOnRow) {
+    if (!wasBand && !bandDownOnRow && !additive) {
       // Plain click on empty space clears the selection; on a row the normal
-      // row-click handler takes over.
+      // row-click handler takes over. Ctrl/Cmd clicks on empty space keep it.
       selectedItems.value = []
     }
   }
