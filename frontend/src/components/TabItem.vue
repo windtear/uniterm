@@ -161,12 +161,11 @@ const { duplicateSession } = useDuplicateSession()
 const { t } = useI18n()
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
-const isWindows = /Windows|Win32/i.test(navigator.userAgent)
 const tabShortcut = computed(() => {
   if (!props.shortcutIndex || props.shortcutIndex > 9) return ''
+  // Fixed platform digit shortcuts: Cmd+N on macOS, Ctrl+N elsewhere.
   if (isMac) return `⌘${props.shortcutIndex}`
-  if (isWindows) return `Ctrl+${props.shortcutIndex}`
-  return ''
+  return `Ctrl+${props.shortcutIndex}`
 })
 
 // Human-readable keybinding for a shortcut action ('' when unset), shown as a

@@ -199,18 +199,17 @@ const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
-const isWindows = /Windows|Win32/i.test(navigator.userAgent)
 const panelShortcut = computed(() => {
   if (!props.shortcutIndex || props.shortcutIndex > 9) return ''
+  // Fixed platform digit shortcuts: Option+N on macOS, Alt+N elsewhere.
   if (isMac) return `⌥${props.shortcutIndex}`
-  if (isWindows) return `Alt+${props.shortcutIndex}`
-  return ''
+  return `Alt+${props.shortcutIndex}`
 })
 const workspaceTab = computed(() =>
   props.workspaceId ? tabStore.tabs.find(tab => tab.id === props.workspaceId && tab.type === 'workspace') : undefined
 )
 const isMaximized = computed(() => workspaceTab.value?.maximizedPanelId === props.panel.id)
-const maximizeShortcut = computed(() => isMac ? '⌘⇧↩' : isWindows ? 'Ctrl+Shift+Enter' : '')
+const maximizeShortcut = computed(() => isMac ? '⌘⇧↩' : 'Ctrl+Shift+Enter')
 const maximizeTitle = computed(() => {
   const label = t(isMaximized.value ? 'workspace.restorePanel' : 'workspace.maximizePanel')
   return maximizeShortcut.value ? `${label} (${maximizeShortcut.value})` : label

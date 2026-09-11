@@ -745,15 +745,15 @@ function onWheel(e: WheelEvent) {
   }
 }
 
-// Platform shortcuts: macOS uses Cmd/Option and Windows uses Ctrl/Alt. Linux
-// keeps these combinations available to terminals and configurable bindings.
+// Platform digit shortcuts: macOS uses Cmd/Option, Windows and Linux use
+// Ctrl/Alt. Cmd/Ctrl+1…9 switches tabs, Alt/Option+1…9 switches workspace
+// panels; Ctrl/Cmd+Shift+Enter maximizes the active panel.
 let isMac = false
-let isWindows = false
 function onPlatformSystemShortcut(e: KeyboardEvent) {
-  if ((!isMac && !isWindows) || e.defaultPrevented) return
+  if (e.defaultPrevented) return
   const workspaceMaximizeShortcut = e.shiftKey && !e.altKey && (
     (isMac && e.metaKey && !e.ctrlKey) ||
-    (isWindows && e.ctrlKey && !e.metaKey)
+    (!isMac && e.ctrlKey && !e.metaKey)
   )
   if (workspaceMaximizeShortcut && e.code === 'Enter') {
     const tab = tabStore.activeTab
@@ -780,7 +780,7 @@ function onPlatformSystemShortcut(e: KeyboardEvent) {
   }
   const tabModifier = !e.altKey && !e.shiftKey && (
     (isMac && e.metaKey && !e.ctrlKey) ||
-    (isWindows && e.ctrlKey && !e.metaKey)
+    (!isMac && e.ctrlKey && !e.metaKey)
   )
   if (tabModifier && digitMatch) {
     const tab = tabStore.tabs[Number(digitMatch[1]) - 1]
@@ -827,16 +827,15 @@ onMounted(async () => {
   // Capture phase: xterm v6's viewport stopPropagation()s wheel events it
   // scrolls, but bails on defaultPrevented — so we must preempt it.
   document.addEventListener('wheel', onWheel, { passive: false, capture: true })
-  // macOS system shortcuts (Cmd+Q / Cmd+W) — only armed on darwin.
+  // macOS system shortcuts (Cmd+Q / Cmd+W) — the digit shortcuts in
+  // onPlatformSystemShortcut are armed on every platform.
   try {
     const platform = await GetPlatform()
     isMac = platform === 'darwin'
-    isWindows = platform === 'windows'
   } catch {
     isMac = false
-    isWindows = false
   }
-  if (isMac || isWindows) document.addEventListener('keydown', onPlatformSystemShortcut, true)
+  document.addEventListener('keydown', onPlatformSystemShortcut, true)
   // Keyboard shortcuts — load once on mount, watch for settings changes
   applyKeybindings()
   installGlobalListener()
@@ -1055,12 +1054,9 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
 }
 
 function applyKeybindings() {
-  // Modifier+digit tab jumping (Alt+1 … Alt+9, Alt+0 = tenth tab): the digit
-  // is 1-based into the visible tab strip; out-of-range digits do nothing.
-  loadKeybindings(settingsStore.settings.keyboard, actionHandlers, (index) => {
-    const tab = tabStore.tabs[index - 1]
-    if (tab) tabStore.setActiveTab(tab.id)
-  })
+  // Digit shortcuts (Ctrl/Cmd+digit → tab, Alt/Option+digit → workspace
+  // panel) are fixed platform bindings handled by onPlatformSystemShortcut.
+  loadKeybindings(settingsStore.settings.keyboard, actionHandlers)
 }
 
 onUnmounted(() => {

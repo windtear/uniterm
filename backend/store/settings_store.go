@@ -367,8 +367,5 @@ func defaultKeyboard() map[string]KeyBinding {
 		"navigatePrev":     {Ctrl: false, Shift: false, Alt: true, Key: "arrowleft"},
 		"navigateNext":     {Ctrl: false, Shift: false, Alt: true, Key: "arrowright"},
 		"openSettings":     {Ctrl: true, Shift: false, Alt: false, Key: ","},
-		// Modifier held with a digit key jumps to that tab (1-9, 0 = tenth).
-		// Only the flags are read; Key stays empty. All flags false = feature off.
-		"tabSwitchModifier": {Ctrl: false, Shift: false, Alt: true},
 	}
 }
