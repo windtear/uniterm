@@ -131,6 +131,13 @@ func NewApp(webviewDataPath string) *App {
 		a.emit("sftp:transfer", payload)
 	}
 
+	// OSC-7 cwd reports from SSH/WSL terminals (see backend/session/shell_
+	// integration.go) are forwarded so the frontend can follow the active
+	// directory in the sidebar.
+	session.TerminalCwdSink = func(sid string, cwd string) {
+		a.emit("terminal:cwd", map[string]any{"sessionId": sid, "cwd": cwd})
+	}
+
 	return a
 }
 

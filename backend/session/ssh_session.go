@@ -56,6 +56,10 @@ type SSHSession struct {
 	expectOutput *postLoginOutputBuffer
 	x11Forwarder *x11Forwarder
 
+	// osc7 extracts injected OSC-7 cwd reports from the raw output stream
+	// (see shell_integration.go). Only used from the readLoop goroutine.
+	osc7 osc7Scanner
+
 	enc            encoding.Encoding     // input(write) codec; nil = utf-8 passthrough
 	encoder        transform.Transformer // cached encoder; nil = utf-8 passthrough (F-003)
 	decoder        *encoding.Decoder     // persistent streaming decoder for output(read)
@@ -312,7 +316,20 @@ func (s *SSHSession) Connect(config ConnectionConfig) error {
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
-	if err := session.Shell(); err != nil {
+	// Shell integration: try to start the shell with an OSC-7 cwd hook
+	// injected. Any failure (detection, temp file write, Start) degrades
+	// silently to a plain shell — integration must never fail the session.
+	if startCmd := injectShellIntegration(client); startCmd != "" {
+		if err := session.Start(startCmd); err != nil {
+			log.Writef("ssh: integration start failed, falling back to plain shell: %v", err)
+			if err := session.Shell(); err != nil {
+				session.Close()
+				client.Close()
+				s.setStatus(StatusError)
+				return fmt.Errorf("shell: %w", err)
+			}
+		}
+	} else if err := session.Shell(); err != nil {
 		session.Close()
 		client.Close()
 		s.setStatus(StatusError)
@@ -385,9 +402,25 @@ func (s *SSHSession) readLoop() {
 			s.RecordReadActivity()
 			data := buf[:n]
 			// lastRecv outlives this iteration (Disconnect logs it after
-			// readLoop returns) so it must hold an independent copy.
+			// readLoop returns) so it must hold an independent copy. It
+			// keeps the RAW server bytes (diagnostics), not the cleaned
+			// stream below.
 			s.lastRecv.Store(append([]byte(nil), data...))
-			s.offerExpectOutput(data)
+			// OSC-7 extraction runs on the RAW byte stream, BEFORE decoding:
+			// the sequence is pure ASCII while legacy codecs (GBK/Big5/...)
+			// could mangle its bytes or withhold a fragment in their
+			// cross-chunk multibyte leftover. The cwd itself is percent-
+			// decoded UTF-8 and goes straight to the sink, never back into
+			// the terminal stream. The cleaned remainder replaces the data
+			// for every downstream consumer so stripped sequences never
+			// render. During zmodem transfers the raw bytes are emitted
+			// unchanged (binary fidelity); the scanner still runs so its
+			// state cannot desync.
+			cwd, cleaned, found := s.osc7.Feed(data)
+			if found && TerminalCwdSink != nil {
+				TerminalCwdSink(s.id, cwd)
+			}
+			s.offerExpectOutput(cleaned)
 			if s.IsZmodemMode() {
 				s.emitBinary(data)
 			} else if looksLikeZmodemHeader(data) {
@@ -395,7 +428,7 @@ func (s *SSHSession) readLoop() {
 				s.SetZmodemMode(true)
 				s.emitBinary(data)
 			} else {
-				s.emitData(s.decodeOutput(data))
+				s.emitData(s.decodeOutput(cleaned))
 			}
 		}
 		if err != nil {
