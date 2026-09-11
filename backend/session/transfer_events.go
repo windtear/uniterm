@@ -46,6 +46,7 @@ func (s *baseSession) emitTransferStart(task *TransferTask) {
 		"taskId": task.ID, "event": "start", "tfType": task.Type,
 		"name": transferDisplayName(task), "total": task.loadTotal(),
 		"localPath": task.LocalPath, "remotePath": task.RemotePath,
+		"fileCount": task.fileCount(),
 	})
 }
 
@@ -74,9 +75,17 @@ func (s *baseSession) emitTransferComplete(task *TransferTask) {
 	progressMu.Lock()
 	delete(progressLast, task.ID)
 	progressMu.Unlock()
-	s.emitTransferPayload(map[string]any{
+	payload := map[string]any{
 		"taskId": task.ID, "event": "complete", "status": task.Status,
-	})
+	}
+	task.fileMu.RLock()
+	if task.FileCount > 0 || task.FailedFiles != nil {
+		payload["failedFiles"] = task.FailedFiles
+		payload["completedFiles"] = task.CompletedFiles
+		payload["fileCount"] = task.FileCount
+	}
+	task.fileMu.RUnlock()
+	s.emitTransferPayload(payload)
 }
 
 // emitTransferEvent reports a task-level error (event "complete", status "error").
@@ -84,5 +93,26 @@ func (s *baseSession) emitTransferEvent(task *TransferTask, err error) {
 	task.Status = "error"
 	s.emitTransferPayload(map[string]any{
 		"taskId": task.ID, "event": "complete", "status": "error", "error": err.Error(),
+	})
+}
+
+// --- Per-file events (directory transfers) ---
+
+func (s *baseSession) emitFileStart(task *TransferTask, rel, display string) {
+	s.emitTransferPayload(map[string]any{
+		"taskId": task.ID, "event": "file-start", "file": rel, "name": display,
+	})
+}
+
+func (s *baseSession) emitFileDone(task *TransferTask, rel string) {
+	s.emitTransferPayload(map[string]any{
+		"taskId": task.ID, "event": "file-done", "file": rel,
+		"completedFiles": task.completedCount(), "fileCount": task.fileCount(),
+	})
+}
+
+func (s *baseSession) emitFileFailed(task *TransferTask, rel string, err error) {
+	s.emitTransferPayload(map[string]any{
+		"taskId": task.ID, "event": "file-failed", "file": rel, "error": err.Error(),
 	})
 }
