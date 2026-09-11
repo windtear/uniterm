@@ -83,6 +83,7 @@
 | 终端 | Local | PowerShell、CMD、Git Bash 等本地 Shell |
 | 终端 | WSL | 通过本地终端打开已安装的 WSL 发行版 |
 | 文件传输 | SFTP | 服务器文件管理与传输 |
+| 文件传输 | SCP (1.9.3-alpha) | 兼容旧版 SSH 服务器的降级方案，适用于不支持 SFTP 协议的服务器 |
 | 文件传输 | FTP / FTPS | 网站空间、NAS 文件传输 |
 | 文件传输 | SMB | Windows 共享文件夹、NAS 文件访问 |
 | 文件传输 | WebDAV | WebDAV 服务器文件管理 |
@@ -284,6 +285,7 @@ uniTerm/
 - [@jiayunora](https://github.com/jiayunora)
 - [@iCarrear](https://github.com/iCarrear)
 - [@boltomli](https://github.com/boltomli)
+- [@kxn](https://github.com/kxn)
 
 ## 开源协议
 

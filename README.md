@@ -83,6 +83,7 @@ Connection management, split panes, cloud sync, themes — your terminal, your w
 | Terminal | Local | PowerShell, CMD, Git Bash, and other local shells |
 | Terminal | WSL | Open installed WSL distributions via local terminal |
 | File Transfer | SFTP | Server file management and transfer |
+| File Transfer | SCP (1.9.3-alpha) | Fallback protocol for legacy SSH servers that do not support SFTP |
 | File Transfer | FTP / FTPS | Website hosting, NAS file transfer |
 | File Transfer | SMB | Windows shared folders, NAS file access |
 | File Transfer | WebDAV | WebDAV server file management |
@@ -284,6 +285,7 @@ Thanks to the following people for contributing code and improvements, and to ev
 - [@jiayunora](https://github.com/jiayunora)
 - [@iCarrear](https://github.com/iCarrear)
 - [@boltomli](https://github.com/boltomli)
+- [@kxn](https://github.com/kxn)
 
 ## License
 

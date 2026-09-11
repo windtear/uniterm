@@ -28,6 +28,7 @@ Legend: ✅ Shipped, 🚧 Planned
 | SMB | ✅ | v1.2.2 | Windows shared folders and NAS |  |
 | WebDAV | ✅ | v1.2.2 | WebDAV file management |  |
 | S3 | ✅ | v1.2.2 | Amazon S3 compatible object storage |  |
+| SCP | 🚧 | v1.9.3-alpha | Fallback for legacy SSH servers without SFTP support |  |
 
 ### Remote Desktop
 
