@@ -56,6 +56,7 @@ export interface WorkspaceTab {
   panelIds: string[]
   layout: PanelLayout
   activePanelId: string | null
+  maximizedPanelId?: string | null
   locked?: boolean
 }
 

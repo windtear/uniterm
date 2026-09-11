@@ -228,27 +228,33 @@ func (ts *TunnelService) dialChain(chain []ConnectionConfig, upstream *SocksProx
 
 	for i, cfg := range chain {
 		addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+		authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(cfg, nil)
+		if err != nil {
+			closeClients(clients)
+			return nil, nil, fmt.Errorf("ssh auth %s: %w", addr, err)
+		}
 
 		var raw net.Conn
-		var err error
 		if i == 0 {
 			raw, err = dialFirstHop(addr, upstream)
 		} else {
 			raw, err = prev.Dial("tcp", addr)
 		}
 		if err != nil {
+			cleanup()
 			closeClients(clients)
 			return nil, nil, fmt.Errorf("dial %s: %w", addr, err)
 		}
 
 		clientConfig := &ssh.ClientConfig{
 			User:            cfg.User,
-			Auth:            makeSSHAuthMethods(cfg, nil),
+			Auth:            authMethods,
 			Timeout:         30 * time.Second,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Config:          sshAlgorithms(),
 		}
 		sshConn, chans, reqs, err := ssh.NewClientConn(raw, addr, clientConfig)
+		cleanup()
 		if err != nil {
 			raw.Close()
 			closeClients(clients)
@@ -423,7 +429,7 @@ func (ts *TunnelService) TunnelStates() []TunnelState {
 // --- minimal SOCKS5 server (CONNECT only, no auth) for dynamic tunnels ---
 
 const (
-	socks5Success        = 0x00
+	socks5Success         = 0x00
 	socks5HostUnreachable = 0x04
 )
 

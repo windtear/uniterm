@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	mosh "github.com/unixshells/mosh-go"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
-	mosh "github.com/unixshells/mosh-go"
 )
 
 type MoshSession struct {
@@ -54,14 +54,19 @@ func (s *MoshSession) Connect(config ConnectionConfig) error {
 	}
 
 	// Step 1: SSH to remote and start mosh-server to get key + UDP port.
-	authMethods := makeSSHAuthMethods(config, nil)
+	authMethods, cleanup, err := makeSSHAuthMethodsForAttempt(config, nil)
+	if err != nil {
+		s.setStatus(StatusError)
+		return fmt.Errorf("mosh ssh auth: %w", err)
+	}
+	defer cleanup()
 	addr := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	clientConfig := &ssh.ClientConfig{
 		User:            config.User,
 		Auth:            authMethods,
 		Timeout:         30 * time.Second,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Config: sshAlgorithms(),
+		Config:          sshAlgorithms(),
 	}
 
 	conn, err := net.DialTimeout("tcp", addr, clientConfig.Timeout)

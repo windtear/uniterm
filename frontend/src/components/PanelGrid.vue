@@ -4,6 +4,7 @@
       :node="layout.root"
       :panel-ids="panelIds"
       :active-panel-id="activePanelId"
+      :maximized-panel-id="maximizedPanelId"
       :tab-id="tabId"
       @close-panel="$emit('closePanel', $event)"
       @toggle-ai-lock="$emit('toggleAiLock', $event)"
@@ -24,6 +25,7 @@ defineProps<{
   layout: PanelLayout
   panelIds: string[]
   activePanelId: string | null
+  maximizedPanelId: string | null
   tabId: string
 }>()
 

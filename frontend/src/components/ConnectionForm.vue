@@ -80,6 +80,8 @@
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="key">{{ t('conn.keyPath') }}</el-radio-button>
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="keyText">{{ t('conn.keyText') }}</el-radio-button>
                 <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="identity">{{ t('conn.identity') }}</el-radio-button>
+                <el-radio-button v-if="form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop'" label="kerberos">{{ t('conn.kerberos') }}</el-radio-button>
+                <el-radio-button v-if="(isWindows || isMac) && (form.type === 'ssh' || form.type === 'scp' || form.type === 'sftp' || form.type === 'mosh' || form.type === 'x11-desktop')" label="agent">{{ t('conn.sshAgent') }}</el-radio-button>
                 <el-radio-button v-if="isElasticsearch" label="apikey">{{ t('conn.esAuthApiKey') }}</el-radio-button>
               </el-radio-group>
             </el-form-item>
@@ -112,6 +114,13 @@
             </template>
             <el-form-item v-if="form.type !== 'local' && form.type !== 'wsl' && form.type !== 'serial' && form.type !== 'tcp' && form.type !== 'k8s' && form.type !== 'container' && form.authType !== 'identity' && ((form.authType === 'password' && form.type !== 'rdp') || (form.type === 'rdp' && !form.rdpEnableNLA) || form.type === 'vnc' || form.type === 'spice' || form.type === 'database' || form.type === 'telnet' || form.type === 'ftp' || form.type === 'smb' || form.type === 'webdav' || form.type === 's3') && !(form.type === 'database' && form.dbType === 'rqlite')" :label="form.type === 's3' ? 'Secret Key' : (isEsApiKey ? t('conn.esApiKey') : t('conn.password'))">
               <el-input v-model="form.password" type="password" show-password :key="passwordInputKey" :placeholder="form.type === 's3' ? 'Secret Access Key' : (isEsApiKey ? t('conn.esApiKeyPlaceholder') : '')" />
+            </el-form-item>
+            <el-form-item v-if="form.authType === 'kerberos'" :label="t('conn.kerberos')">
+              <div class="field-hint">{{ t('conn.kerberosHint') }}</div>
+            </el-form-item>
+            <el-form-item v-if="form.authType === 'kerberos'" :label="t('conn.kerberosRealm')">
+              <el-input v-model="form.kerberosRealm" :placeholder="t('conn.kerberosRealmPlaceholder')" />
+              <div class="field-hint">{{ t('conn.kerberosRealmHint') }}</div>
             </el-form-item>
             <el-form-item v-if="form.type === 'rdp' && isWindows" :label="t('conn.rdpAdminSession')">
               <el-select v-model="form.rdpAdminSession" style="width: 100%">
@@ -528,6 +537,10 @@
               <el-switch v-model="form.x11Forwarding" />
               <span v-if="x11HintKey" class="field-hint" style="margin-left: 12px;">{{ t(x11HintKey) }}</span>
             </el-form-item>
+            <el-form-item v-if="form.type === 'ssh'" :label="t('conn.agentForwarding')">
+              <el-switch v-model="form.agentForwarding" />
+              <span class="field-hint" style="margin-left: 12px;">{{ t('conn.agentForwardingDesc') }}</span>
+            </el-form-item>
             <template v-if="form.type === 'ftp'">
               <el-form-item :label="t('conn.ftpEncryption')">
                 <el-select v-model="form.ftpEncryption">
@@ -698,8 +711,13 @@ onMounted(() => {
 
 // ── Platform detection (before allSubTypes so it's available in computed closures) ──
 const isWindows = ref(/windows/i.test(navigator.userAgent) || /win32/i.test(navigator.platform))
+const isMac = ref(/mac/i.test(navigator.platform))
 const platform = ref<string>('')
-GetPlatform().then(p => { platform.value = p })
+GetPlatform().then(p => {
+  platform.value = p
+  isWindows.value = p === 'windows'
+  isMac.value = p === 'darwin'
+})
 
 // ── Categories & sub-types ──
 interface SubTypeInfo {
@@ -987,6 +1005,7 @@ const form = reactive<ConnectionConfig>({
   port: 22,
   user: '',
   authType: 'password',
+  kerberosRealm: '',
   password: '',
   keyPath: '',
   keyContent: '',
@@ -1014,6 +1033,7 @@ const form = reactive<ConnectionConfig>({
   sftpMaxConcurrency: 5,
   fileTransferProto: 'sftp' as 'sftp' | 'scp',
   x11Forwarding: false,
+  agentForwarding: false,
   ftpEncryption: 'none',
   ftpPassive: true,
   ftpEncoding: 'utf-8',
@@ -1221,6 +1241,7 @@ watch(() => props.editConfig, (config) => {
     form.rdpEnableNLA = config.rdpEnableNLA ?? false
     form.rdpAdminSession = config.rdpAdminSession ?? false
     form.x11Forwarding = config.x11Forwarding ?? false
+    form.agentForwarding = config.agentForwarding ?? false
     // Existing SSH connections without the field default to SFTP (old behavior).
     form.fileTransferProto = config.fileTransferProto ?? 'sftp'
     // Redis key separator defaults to ":" (empty from old connections = ":").
@@ -1352,6 +1373,7 @@ function resetForm() {
   form.rdpEnableNLA = true
   form.rdpDomain = ''
   form.rdpAdminSession = false
+  form.kerberosRealm = ''
   form.dbType = ''
   form.dbName = ''
   form.dbParams = ''
@@ -1369,6 +1391,8 @@ function resetForm() {
   postLoginMode.value = 'script'
   form.sftpMaxConcurrency = 5
   form.fileTransferProto = 'sftp'
+  form.x11Forwarding = false
+  form.agentForwarding = false
   form.ftpEncryption = 'none'
   form.ftpPassive = true
   form.ftpEncoding = 'utf-8'
@@ -1552,6 +1576,9 @@ function normalizeForm(): ConnectionConfig {
   // 文本原样带进仓库（同 #711 语义）。
   if (normalized.authType !== 'key') normalized.keyPath = ''
   if (normalized.authType !== 'keyText') normalized.keyContent = ''
+  normalized.kerberosRealm = normalized.authType === 'kerberos'
+    ? normalized.kerberosRealm?.trim()
+    : ''
   normalized.postLoginExpectSteps = normalizeExpectSteps(form.postLoginExpectSteps || [])
   if (postLoginMode.value === 'script') {
     normalized.postLoginExpectSteps = []

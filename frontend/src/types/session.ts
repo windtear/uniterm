@@ -21,7 +21,8 @@ export interface ConnectionConfig {
   host: string
   port: number
   user: string
-  authType: 'password' | 'key' | 'keyText' | 'agent' | 'identity'
+  authType: 'password' | 'key' | 'keyText' | 'agent' | 'identity' | 'kerberos'
+  kerberosRealm?: string // realm used for IP targets, e.g. EXAMPLE.COM
   password?: string
   keyPath?: string
   keyContent?: string // inline private-key text (authType === 'keyText')
@@ -134,6 +135,7 @@ export interface ConnectionConfig {
   // (XQuartz on macOS, VcXsrv on Windows). Silent degradation on
   // missing $DISPLAY / xauth — see backend x11_forward.go.
   x11Forwarding?: boolean
+  agentForwarding?: boolean
   // Enable session output log automatically on first connect. Applies
   // to terminal-stream types (ssh/telnet/serial/mosh/local).
   logOnConnect?: boolean

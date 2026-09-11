@@ -41,6 +41,9 @@ type TerminalSettings struct {
 	// output logs (issue #227). Empty means: use the OS-appropriate
 	// default under ~/Documents/uniTerm/logs.
 	SessionLogDir string `json:"sessionLogDir,omitempty"`
+	// SessionLogFilename controls names for new output logs. Supported tokens:
+	// %S session name, %H host, %M month, %D day, %h hour, %m minute.
+	SessionLogFilename string `json:"sessionLogFilename,omitempty"`
 	// WordSeparator overrides xterm.js's double-click word-selection
 	// separators. Empty means the frontend falls back to its built-in
 	// default. Mirrors the `wordSeparator` Terminal option.
@@ -130,6 +133,7 @@ type AIModelConfig struct {
 
 type AISettings struct {
 	MaxTurns      *int            `json:"maxTurns"`
+	FontSize      *int            `json:"fontSize"`
 	Models        []AIModelConfig `json:"models"`
 	ActiveModelID string          `json:"activeModelId"`
 }
@@ -297,6 +301,10 @@ func (s *SettingsStore) Load() (AppSettings, error) {
 		settings.CloseAppPrompt = boolPtr(true)
 		needsSave = true
 	}
+	if settings.AI.FontSize == nil {
+		settings.AI.FontSize = intPtr(15)
+		needsSave = true
+	}
 	if needsSave {
 		// Re-save through Save() which takes the lock itself.
 		_ = s.Save(settings)
@@ -319,6 +327,7 @@ func defaultSettings() AppSettings {
 		},
 		AI: AISettings{
 			MaxTurns: intPtr(20),
+			FontSize: intPtr(15),
 			Models: []AIModelConfig{
 				{
 					ID:       "model-default",

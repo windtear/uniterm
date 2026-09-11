@@ -90,6 +90,8 @@ export interface TerminalSettings {
   // Override for the session output log directory. Empty means the
   // OS default under ~/Documents/uniTerm/logs.
   sessionLogDir: string
+  // Filename template: %S session, %H host, %M month, %D day, %h hour, %m minute.
+  sessionLogFilename: string
   // Characters that act as word boundaries for xterm.js's double-click
   // word selection. Default mirrors the built-in xterm separators
   // extended with the most common shell / path punctuation, so that
@@ -134,13 +136,14 @@ export const USER_AGENT_PRESETS: { label: string; value: string }[] = [
 
 export interface AISettings {
   maxTurns: number
+  fontSize: number
   models: AIModelConfig[]
   activeModelId: string
 }
 
 export type ShortcutAction =
   | 'nextTab' | 'prevTab'
-  | 'newConnection' | 'toggleSidebar'
+  | 'newConnection' | 'toggleSidebar' | 'openQuickCommands'
   | 'focusAI' | 'focusTerminal' | 'lockAI'
   | 'closePanel'
   | 'navigatePrev' | 'navigateNext'
@@ -178,6 +181,7 @@ export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   navigateNext: 'shortcut.navigateNext',
   closePanel: 'shortcut.closePanel',
   toggleSidebar: 'shortcut.toggleSidebar',
+  openQuickCommands: 'shortcut.openQuickCommands',
   focusTerminal: 'shortcut.focusTerminal',
   focusAI: 'shortcut.focusAI',
   lockAI: 'shortcut.lockAI',
@@ -197,6 +201,7 @@ export const DEFAULT_KEYBOARD: KeyboardSettings = {
   prevTab: { ctrl: true, shift: true, alt: false, key: 'tab' },
   newConnection: { ctrl: true, shift: true, alt: false, key: 'n' },
   toggleSidebar: { ctrl: true, shift: true, alt: false, key: 'h' },
+  openQuickCommands: { ctrl: false, meta: true, shift: false, alt: false, key: 'k' },
   focusTerminal: { ctrl: true, shift: true, alt: false, key: 'j' },
   focusAI: { ctrl: true, shift: true, alt: false, key: 'k' },
   closePanel: { ctrl: true, shift: true, alt: false, key: 'q' },
@@ -296,6 +301,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     cursorStyle: 'block',
     minimumContrast: 4.5,
     sessionLogDir: '',
+    sessionLogFilename: '%S_%H_%M%D_%h%m.log',
     wordSeparator: '\\ :;~`!@#$%^&*()=+|[]{}\'",<>?',
     showLineNumbers: false,
     showTimestamps: false,
@@ -303,6 +309,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   ai: {
     maxTurns: 20,
+    fontSize: 15,
     models: [
       {
         id: 'model-default',

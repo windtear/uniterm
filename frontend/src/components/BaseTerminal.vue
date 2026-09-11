@@ -139,6 +139,7 @@ import { useTabStore } from '../stores/tabStore'
 import { usePanelStore } from '../stores/panelStore'
 import { useTerminalMenu } from '../composables/useTerminalMenu'
 import { writeClipboard } from '../composables/useClipboardWrite'
+import { filterTerminalInput } from '../utils/terminalInputFilter'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
 import MenuDivider from './MenuDivider.vue'
@@ -749,29 +750,6 @@ function onSplitResizeEnd() {
       resize()
     }, 0)
   })
-}
-
-// Strip OSC sequences that xterm.js generates internally (color queries etc.)
-// and CSI *responses* it auto-generates when the remote app queries the
-// terminal (CPR cursor-position, DSR status, DA device-attributes, cell/window
-// size). These are xterm.js talking back to a query — echoing them to the
-// remote as if they were user input corrupts the app: a stray `ESC[2;2R`
-// arriving mid-render makes some remote vims exit, closing the channel (issue
-// #242). This must happen in the alternate screen too — vim/less/tmux are
-// exactly the apps that emit `ESC[6n` and friends. Focus in/out (I/O) is left
-// intact in the alternate screen because full-screen apps legitimately want
-// FocusGained/FocusLost.
-function filterTerminalInput(input: string, inAlternateScreen: boolean): string {
-  // OSC sequences: ESC ] ... BEL or ESC ] ... ESC \
-  let filtered = input.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-  // Terminal query responses — strip in both normal and alternate screens.
-  filtered = filtered.replace(/\x1b\[(?:[?>][\d;]*|[\d;]*)([Rntc])/g, '')
-  if (inAlternateScreen) {
-    return filtered
-  }
-  // Normal screen only: also strip focus in/out, which a shell doesn't want.
-  filtered = filtered.replace(/\x1b\[(?:[?>][\d;]*|[\d;]*)([IO])/g, '')
-  return filtered
 }
 
 function writeTerminalInput(data: string, inAlternateScreen: boolean) {

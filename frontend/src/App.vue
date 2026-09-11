@@ -12,7 +12,7 @@
       @tab-dragstart="onTabDragStart"
     />
     <div class="main-content">
-      <Sidebar ref="sidebarRef" :visible="sidebarVisible" @toggle="sidebarVisible = !sidebarVisible" @connect="onConnect" @connect-only="onConnectOnly" @connect-serial="showSerialDialog = true" @connect-sftp="(c: any) => { const p = tabStore.activeTab; onConnectSftp(c, p?.type === 'start' ? p : undefined) }" @connect-wsl-file="(c: any) => { const p = tabStore.activeTab; onConnectWslFile(c, p?.type === 'start' ? p : undefined) }" @connect-ftp="(c: any) => { const p = tabStore.activeTab; onConnectFtp(c, p?.type === 'start' ? p : undefined) }" @connect-smb="(c: any) => { const p = tabStore.activeTab; onConnectSmb(c, p?.type === 'start' ? p : undefined) }" @connect-webdav="(c: any) => { const p = tabStore.activeTab; onConnectWebdav(c, p?.type === 'start' ? p : undefined) }" @connect-s3="(c: any) => { const p = tabStore.activeTab; onConnectS3(c, p?.type === 'start' ? p : undefined) }" @connect-rdp="(c: any) => { const p = tabStore.activeTab; onConnectRDP(c, p?.type === 'start' ? p : undefined) }" @connect-vnc="(c: any) => { const p = tabStore.activeTab; onConnectVNC(c, p?.type === 'start' ? p : undefined) }" @connect-spice="(c: any) => { const p = tabStore.activeTab; onConnectSPICE(c, p?.type === 'start' ? p : undefined) }" @connect-x11-desktop="(c: any) => { const p = tabStore.activeTab; onConnectX11Desktop(c, p?.type === 'start' ? p : undefined) }" @connect-d-b="(c: any) => { const p = tabStore.activeTab; onConnectDB(c, p?.type === 'start' ? p : undefined) }" @connect-monitor="(c: any) => { const p = tabStore.activeTab; onConnectMonitor(c, p?.type === 'start' ? p : undefined) }" @connect-k8s="(c: any) => { const p = tabStore.activeTab; onConnectK8s(c, p?.type === 'start' ? p : undefined) }" />
+      <Sidebar ref="sidebarRef" :visible="sidebarVisible" @toggle="sidebarVisible = !sidebarVisible" @connect="onConnect" @connect-to-workspace="({ config, workspaceId }: any) => onConnect(config, undefined, undefined, true, workspaceId)" @connect-only="onConnectOnly" @connect-serial="showSerialDialog = true" @connect-sftp="(c: any) => { const p = tabStore.activeTab; onConnectSftp(c, p?.type === 'start' ? p : undefined) }" @connect-wsl-file="(c: any) => { const p = tabStore.activeTab; onConnectWslFile(c, p?.type === 'start' ? p : undefined) }" @connect-ftp="(c: any) => { const p = tabStore.activeTab; onConnectFtp(c, p?.type === 'start' ? p : undefined) }" @connect-smb="(c: any) => { const p = tabStore.activeTab; onConnectSmb(c, p?.type === 'start' ? p : undefined) }" @connect-webdav="(c: any) => { const p = tabStore.activeTab; onConnectWebdav(c, p?.type === 'start' ? p : undefined) }" @connect-s3="(c: any) => { const p = tabStore.activeTab; onConnectS3(c, p?.type === 'start' ? p : undefined) }" @connect-rdp="(c: any) => { const p = tabStore.activeTab; onConnectRDP(c, p?.type === 'start' ? p : undefined) }" @connect-vnc="(c: any) => { const p = tabStore.activeTab; onConnectVNC(c, p?.type === 'start' ? p : undefined) }" @connect-spice="(c: any) => { const p = tabStore.activeTab; onConnectSPICE(c, p?.type === 'start' ? p : undefined) }" @connect-x11-desktop="(c: any) => { const p = tabStore.activeTab; onConnectX11Desktop(c, p?.type === 'start' ? p : undefined) }" @connect-d-b="(c: any) => { const p = tabStore.activeTab; onConnectDB(c, p?.type === 'start' ? p : undefined) }" @connect-monitor="(c: any) => { const p = tabStore.activeTab; onConnectMonitor(c, p?.type === 'start' ? p : undefined) }" @connect-k8s="(c: any) => { const p = tabStore.activeTab; onConnectK8s(c, p?.type === 'start' ? p : undefined) }" />
       <div class="tab-area">
         <template v-if="activeTab">
           <KeepAlive>
@@ -545,7 +545,7 @@ function needsCredentialCheck(config: ConnectionConfig): boolean {
   if (!inScope) return false
   if ((config.type === 'ssh' || config.type === 'mosh' || config.type === 'scp' || config.type === 'sftp') && (config.authType === 'key' || config.authType === 'keyText')) return false
   // 身份认证：账密来自身份库，由后端 materializeIdentity 解析，无需补全提示
-  if (config.authType === 'identity') return false
+  if (config.authType === 'identity' || config.authType === 'kerberos' || config.authType === 'agent') return false
   return !config.user || !config.password
 }
 
@@ -745,13 +745,52 @@ function onWheel(e: WheelEvent) {
   }
 }
 
-// macOS-only system shortcuts (issue #339): Cmd+Q quits, Cmd+W closes the
-// active tab. Guarded by isMac so Windows/Linux never see this behaviour —
-// there Ctrl+Q/W stay free for the terminal and the existing keybindings.
+// Platform shortcuts: macOS uses Cmd/Option and Windows uses Ctrl/Alt. Linux
+// keeps these combinations available to terminals and configurable bindings.
 let isMac = false
-function onMacSystemShortcut(e: KeyboardEvent) {
-  if (!isMac || e.defaultPrevented) return
-  if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+let isWindows = false
+function onPlatformSystemShortcut(e: KeyboardEvent) {
+  if ((!isMac && !isWindows) || e.defaultPrevented) return
+  const workspaceMaximizeShortcut = e.shiftKey && !e.altKey && (
+    (isMac && e.metaKey && !e.ctrlKey) ||
+    (isWindows && e.ctrlKey && !e.metaKey)
+  )
+  if (workspaceMaximizeShortcut && e.code === 'Enter') {
+    const tab = tabStore.activeTab
+    if (!tab || tab.type !== 'workspace' || !tab.activePanelId) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    const panelId = tab.activePanelId
+    tabStore.toggleWorkspacePanelMaximize(tab.id)
+    nextTick(() => focusPanelTerminal(panelId))
+    return
+  }
+  const digitMatch = e.code.match(/^Digit([1-9])$/)
+  const workspaceModifier = e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
+  if (workspaceModifier && digitMatch) {
+    const tab = tabStore.activeTab
+    if (!tab || tab.type !== 'workspace') return
+    const panelId = tab.panelIds[Number(digitMatch[1]) - 1]
+    if (!panelId) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    tabStore.setActivePanel(tab.id, panelId)
+    nextTick(() => focusPanelTerminal(panelId))
+    return
+  }
+  const tabModifier = !e.altKey && !e.shiftKey && (
+    (isMac && e.metaKey && !e.ctrlKey) ||
+    (isWindows && e.ctrlKey && !e.metaKey)
+  )
+  if (tabModifier && digitMatch) {
+    const tab = tabStore.tabs[Number(digitMatch[1]) - 1]
+    if (!tab) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    tabStore.setActiveTab(tab.id)
+    return
+  }
+  if (!isMac || !e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
   const key = e.key.toLowerCase()
   if (key === 'q') {
     e.preventDefault()
@@ -789,8 +828,15 @@ onMounted(async () => {
   // scrolls, but bails on defaultPrevented — so we must preempt it.
   document.addEventListener('wheel', onWheel, { passive: false, capture: true })
   // macOS system shortcuts (Cmd+Q / Cmd+W) — only armed on darwin.
-  try { isMac = (await GetPlatform()) === 'darwin' } catch { isMac = false }
-  if (isMac) document.addEventListener('keydown', onMacSystemShortcut, true)
+  try {
+    const platform = await GetPlatform()
+    isMac = platform === 'darwin'
+    isWindows = platform === 'windows'
+  } catch {
+    isMac = false
+    isWindows = false
+  }
+  if (isMac || isWindows) document.addEventListener('keydown', onPlatformSystemShortcut, true)
   // Keyboard shortcuts — load once on mount, watch for settings changes
   applyKeybindings()
   installGlobalListener()
@@ -908,6 +954,10 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
       nextTick(() => sidebarRef.value?.focusSearch())
     }
   },
+  openQuickCommands: () => {
+    sidebarVisible.value = true
+    nextTick(() => sidebarRef.value?.openQuickCommands())
+  },
   focusTerminal: () => {
     const pid = tabStore.getActivePanelId()
     if (pid) focusPanelTerminal(pid)
@@ -989,10 +1039,15 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
     if (!tab) return
     if (tab.type === 'workspace') {
       // A workspace holds several panels; the shortcut duplicates the focused
-      // one (a terminal). Feed it to the shared routine as a terminal tab.
+      // one and keeps the duplicate beside it in the same workspace.
       const pid = tabStore.getActivePanelId()
       const panel = pid ? panelStore.getPanel(pid) : undefined
-      if (panel) duplicateSession({ type: 'terminal', panelId: pid, title: panel.title })
+      if (panel) {
+        duplicateSession(
+          { type: 'terminal', panelId: pid, title: panel.title },
+          { workspaceId: tab.id, targetPanelId: pid },
+        )
+      }
       return
     }
     duplicateSession(tab)
@@ -1011,9 +1066,10 @@ function applyKeybindings() {
 onUnmounted(() => {
   uninstallGlobalListener()
   uninstallFocusRestore?.()
+  updateCheck.dispose()
   window.removeEventListener('input:contextmenu', onInputContextMenu)
   document.removeEventListener('wheel', onWheel, { capture: true })
-  document.removeEventListener('keydown', onMacSystemShortcut, true)
+  document.removeEventListener('keydown', onPlatformSystemShortcut, true)
   // RDP overlay tracking
   window.removeEventListener('rdp:overlay-push', RDPHideForOverlay)
   window.removeEventListener('rdp:overlay-pop', RDPShowForOverlay)
@@ -1292,7 +1348,7 @@ function closeStartAndReposition(prevTab: any): (newTabId: string) => void {
   }
 }
 
-async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?: boolean, persist = true) {
+async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?: boolean, persist = true, targetWorkspaceId?: string) {
   const prev = tabStore.activeTab
   const prevStart = (prev?.type === 'start' && !keepOpen) ? prev : undefined
   // Persist form changes BEFORE dispatching by type. The type-specific
@@ -1363,9 +1419,14 @@ async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?:
   panelStore.updateTitle(panel.id, displayTitle)
   panelStore.bindSession(panel.id, sessionId)
   sessionStore.initSession(sessionId)
-  const tab = prev?.type === 'start'
-    ? tabStore.replaceStartTab(prev.id, panel.title, panel.id)
-    : tabStore.createTerminalTab(panel.title, panel.id)
+  const addedToWorkspace = targetWorkspaceId
+    ? tabStore.addNewPanelToWorkspace(targetWorkspaceId, panel.id)
+    : false
+  const tab = addedToWorkspace
+    ? tabStore.tabs.find(t => t.id === targetWorkspaceId)!
+    : prev?.type === 'start'
+      ? tabStore.replaceStartTab(prev.id, panel.title, panel.id)
+      : tabStore.createTerminalTab(panel.title, panel.id)
   panelStore.movePanelToTab(panel.id, tab.id)
   if (persist) RecordRecentConnection(config.id)
 

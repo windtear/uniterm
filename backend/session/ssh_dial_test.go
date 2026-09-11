@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"errors"
 	"net"
 	"os"
@@ -61,15 +62,23 @@ func startAuthTestServer(t *testing.T, config *ssh.ServerConfig) string {
 // connection config, mirroring the interactive session's call shape.
 func dialAuthTest(t *testing.T, addr, password string, kb ssh.KeyboardInteractiveChallenge) (*ssh.Client, error) {
 	t.Helper()
-	methods, kbAuth := splitSSHAuthMethods(ConnectionConfig{AuthType: "password", Password: password}, kb)
-	config := &ssh.ClientConfig{
-		User:            "tester",
-		Auth:            methods,
-		Timeout:         5 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	config := ConnectionConfig{AuthType: "password", Password: password}
+	newConfig := func(challenge ssh.KeyboardInteractiveChallenge) sshClientConfigFactory {
+		return func() (*ssh.ClientConfig, func(), error) {
+			methods, cleanup, err := makeSSHAuthMethodsForAttempt(config, challenge)
+			if err != nil {
+				return nil, nil, err
+			}
+			return &ssh.ClientConfig{
+				User:            "tester",
+				Auth:            methods,
+				Timeout:         5 * time.Second,
+				HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			}, cleanup, nil
+		}
 	}
-	return dialSSHWithAuthRetry(addr, config, kbAuth, func() (net.Conn, error) {
-		return net.DialTimeout("tcp", addr, config.Timeout)
+	return dialSSHWithAuthRetry(addr, newConfig(nil), newConfig(kb), func() (net.Conn, error) {
+		return net.DialTimeout("tcp", addr, 5*time.Second)
 	})
 }
 
@@ -198,4 +207,36 @@ func TestLiveSSHColdKeyboardInteractiveServer(t *testing.T) {
 		t.Fatalf("handshake still leaks the keyboard-interactive protocol failure: %v", err)
 	}
 	t.Logf("live probe error (should be a plain auth failure): %v", err)
+}
+
+func TestDialSSHWithCipherFallbackRebuildsClientConfig(t *testing.T) {
+	configCalls := 0
+	dialCalls := 0
+	cleanupCalls := 0
+	newConfig := func() (*ssh.ClientConfig, func(), error) {
+		configCalls++
+		return &ssh.ClientConfig{User: "test", HostKeyCallback: ssh.InsecureIgnoreHostKey()}, func() { cleanupCalls++ }, nil
+	}
+	dial := func() (net.Conn, error) {
+		dialCalls++
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			_, _ = bufio.NewReader(server).ReadString('\n')
+		}()
+		return client, nil
+	}
+
+	if _, err := dialSSHWithCipherFallback("example.invalid:22", newConfig, dial); err == nil {
+		t.Fatal("dialSSHWithCipherFallback() error = nil, want handshake error")
+	}
+	if configCalls != 2 {
+		t.Fatalf("client config factory called %d times, want 2", configCalls)
+	}
+	if dialCalls != 2 {
+		t.Fatalf("dialer called %d times, want 2", dialCalls)
+	}
+	if cleanupCalls != 2 {
+		t.Fatalf("attempt cleanup called %d times, want 2", cleanupCalls)
+	}
 }

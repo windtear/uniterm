@@ -120,3 +120,18 @@ describe('useKeyboardShortcuts — modifier+digit tab switching', () => {
     expect(onTabSwitch).toHaveBeenCalledWith(3)
   })
 })
+
+describe('useKeyboardShortcuts — quick commands', () => {
+  it('fires the quick-command handler on Meta+K only', () => {
+    const openQuickCommands = vi.fn()
+    loadKeybindings(
+      { openQuickCommands: { ctrl: false, meta: true, shift: false, alt: false, key: 'k' } },
+      { openQuickCommands } as any,
+    )
+
+    onGlobalKeydown(fakeKey({ metaKey: true, key: 'k' }))
+    onGlobalKeydown(fakeKey({ ctrlKey: true, key: 'k' }))
+
+    expect(openQuickCommands).toHaveBeenCalledTimes(1)
+  })
+})

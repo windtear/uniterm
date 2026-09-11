@@ -8,6 +8,7 @@
 
       <TabItem
         :tab="tab"
+        :shortcut-index="index + 1"
         :is-active="tab.id === activeTabId"
         :has-notification="tabStore.hasTabNotification(tab.id)"
         @activate="setActiveTab"

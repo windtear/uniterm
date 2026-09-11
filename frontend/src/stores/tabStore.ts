@@ -467,7 +467,15 @@ export const useTabStore = defineStore('tab', () => {
     const t = tabState.tabs.find(x => x.id === tabId)
     if (t && t.type === 'workspace') {
       t.activePanelId = panelId
+      if (t.maximizedPanelId) t.maximizedPanelId = panelId
     }
+  }
+
+  function toggleWorkspacePanelMaximize(tabId: string) {
+    const t = tabState.tabs.find(x => x.id === tabId)
+    if (!t || t.type !== 'workspace' || !t.activePanelId) return null
+    t.maximizedPanelId = t.maximizedPanelId ? null : t.activePanelId
+    return t.maximizedPanelId
   }
 
   function updateWorkspaceLayout(tabId: string, layout: PanelLayout) {
@@ -568,7 +576,33 @@ export const useTabStore = defineStore('tab', () => {
       root: insertPanelIntoLayout(wsTab.layout.root, targetPanelId, newPanelId, direction, insertBefore)
     }
     wsTab.activePanelId = newPanelId
+    if (wsTab.maximizedPanelId) wsTab.maximizedPanelId = newPanelId
     tabState.activeTabId = workspaceTabId
+  }
+
+  // Add a newly-created panel directly to an existing workspace. Unlike
+  // addPanelToWorkspaceTab, there is no temporary terminal tab to remove.
+  function addNewPanelToWorkspace(
+    workspaceTabId: string,
+    newPanelId: string,
+    targetPanelId?: string,
+  ): boolean {
+    const wsTab = tabState.tabs.find(t => t.id === workspaceTabId)
+    if (!wsTab || wsTab.type !== 'workspace') return false
+
+    const target = targetPanelId && wsTab.panelIds.includes(targetPanelId)
+      ? targetPanelId
+      : wsTab.activePanelId || wsTab.panelIds[wsTab.panelIds.length - 1]
+    if (!target) return false
+
+    wsTab.layout = {
+      root: insertPanelIntoLayout(wsTab.layout.root, target, newPanelId, 'horizontal', false),
+    }
+    wsTab.panelIds = collectPanelIds(wsTab.layout.root)
+    wsTab.activePanelId = newPanelId
+    if (wsTab.maximizedPanelId) wsTab.maximizedPanelId = newPanelId
+    tabState.activeTabId = workspaceTabId
+    return true
   }
 
   // ── Detach: panel from workspace ──
@@ -587,6 +621,9 @@ export const useTabStore = defineStore('tab', () => {
     tabState.broadcastPanelIds.delete(panelId)
     if (wsTab.activePanelId === panelId) {
       wsTab.activePanelId = wsTab.panelIds[0] || null
+    }
+    if (wsTab.maximizedPanelId === panelId) {
+      wsTab.maximizedPanelId = null
     }
 
     // Keep AI lock when panel is detached from workspace — the
@@ -782,9 +819,11 @@ export const useTabStore = defineStore('tab', () => {
     moveTab,
     renameTab,
     setActivePanel,
+    toggleWorkspacePanelMaximize,
     updateWorkspaceLayout,
     mergeToWorkspace,
     addPanelToWorkspaceTab,
+    addNewPanelToWorkspace,
     removePanelFromWorkspaceTab,
     movePanelInWorkspace,
     setAILockedPanel,

@@ -40,6 +40,14 @@ type ConnectionConfig struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 	AuthType string `json:"authType"`
+	// AuthType "agent" uses SSH_AUTH_SOCK on Unix. On Windows it uses Pageant,
+	// falling back to the Windows OpenSSH agent named pipe.
+	// AuthType "kerberos" uses the local Kerberos credential cache and
+	// SSH gssapi-with-mic; no password or private key is persisted.
+	// KerberosRealm is appended to the host service principal when Host is an
+	// IP address, producing host/<ip>@<REALM>. Domain-name targets keep their
+	// existing canonicalization behavior.
+	KerberosRealm string `json:"kerberosRealm,omitempty"`
 	// IdentityId references a saved Identity (see identity.go). When set with
 	// AuthType "identity", MaterializeIdentity resolves and injects the
 	// credentials at connect time.
@@ -171,6 +179,10 @@ type ConnectionConfig struct {
 	// emitted in the terminal (silent degradation). Trusted mode is used as
 	// fallback when MIT-MAGIC-COOKIE-1 cannot be read from $XAUTHORITY.
 	X11Forwarding bool `json:"x11Forwarding,omitempty"`
+	// AgentForwarding exposes the local SSH agent to the remote SSH session
+	// (the equivalent of OpenSSH's -A option). The private keys remain in the
+	// local agent; only signing requests are forwarded.
+	AgentForwarding bool `json:"agentForwarding,omitempty"`
 	// Backspace key byte sequence for terminal-stream types (ssh/telnet/serial).
 	// The translation happens on the frontend in applyBackspaceKey before the
 	// byte hits SessionWrite, so the backend does not read this field — it is
@@ -282,7 +294,9 @@ type baseSession struct {
 	// logOnConnect mirrors ConnectionConfig.LogOnConnect so the App
 	// layer can query it via AutoLogOnConnect() and decide whether to
 	// enable the log the first time this session binds to a panel.
-	logOnConnect bool
+	logOnConnect   bool
+	logSessionName string
+	logHost        string
 	// idleSignal is sent-to (non-blocking) every time RecordReadActivity
 	// runs. waitIdle subscribes to this channel to avoid the busy-loop
 	// that previously woke every 50ms; see F-017. idleSignalOnce makes
@@ -350,6 +364,22 @@ func (s *baseSession) SetLogOnConnect(v bool) { s.logOnConnect = v }
 // AutoLogOnConnect reports whether this session was created from a
 // connection configured to start logging automatically.
 func (s *baseSession) AutoLogOnConnect() bool { return s.logOnConnect }
+
+// SetLogIdentity records the connection fields used by the session-log
+// filename template. It is called before Connect, so auto-logging can use the
+// original configured name and host even while the connection is starting.
+func (s *baseSession) SetLogIdentity(name, host string) {
+	s.mu.Lock()
+	s.logSessionName = name
+	s.logHost = host
+	s.mu.Unlock()
+}
+
+func (s *baseSession) LogIdentity() (name, host string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.logSessionName, s.logHost
+}
 
 func (s *baseSession) SetPendingSize(cols, rows int) {
 	s.mu.Lock()

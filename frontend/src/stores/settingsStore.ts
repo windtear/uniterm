@@ -57,10 +57,11 @@ export const useSettingsStore = defineStore('settings', () => {
       const loadedSettings = await LoadSettings()
       if (loadedSettings) {
         settings.value = mergeSettings(loadedSettings)
-        loaded.value = true
       }
     } catch {
       // use defaults
+    } finally {
+      loaded.value = true
     }
     try {
       availableShells.value = await GetAvailableShells()
@@ -282,6 +283,7 @@ function mergeSettings(loaded: AppSettings): AppSettings {
     },
     ai: {
       maxTurns: loaded.ai?.maxTurns ?? DEFAULT_SETTINGS.ai.maxTurns,
+      fontSize: loaded.ai?.fontSize ?? DEFAULT_SETTINGS.ai.fontSize,
       models: loaded.ai?.models?.length ? loaded.ai.models : DEFAULT_SETTINGS.ai.models,
       activeModelId: loaded.ai?.activeModelId || DEFAULT_SETTINGS.ai.activeModelId
     },

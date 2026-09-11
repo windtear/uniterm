@@ -34,8 +34,18 @@
           @click.stop
           @contextmenu.stop
         />
+        <span v-if="panelShortcut" class="panel-shortcut">{{ panelShortcut }}</span>
       </div>
       <div class="panel-header-actions">
+        <button
+          v-if="workspaceId"
+          class="panel-maximize"
+          @click.stop="toggleMaximize"
+          :title="maximizeTitle"
+        >
+          <Minimize2 v-if="isMaximized" :size="14" />
+          <Maximize2 v-else :size="14" />
+        </button>
         <button
           v-if="(panel.type === 'ssh' || panel.type === 'local' || panel.type === 'wsl') && workspaceId"
           class="panel-broadcast"
@@ -123,7 +133,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted, inject } from 'vue'
-import { Radio, Sparkles, MoreHorizontal, X, SquareTerminal, Laptop, LaptopMinimal, Cable, Terminal, Zap } from '@lucide/vue'
+import { Radio, Sparkles, MoreHorizontal, X, SquareTerminal, Laptop, LaptopMinimal, Cable, Terminal, Zap, Maximize2, Minimize2 } from '@lucide/vue'
 import BaseTerminal from './BaseTerminal.vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
@@ -170,6 +180,7 @@ const props = defineProps<{
   showHeader: boolean
   isActive: boolean
   workspaceId?: string
+  shortcutIndex?: number
 }>()
 
 const emit = defineEmits<{
@@ -188,6 +199,29 @@ const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const isWindows = /Windows|Win32/i.test(navigator.userAgent)
+const panelShortcut = computed(() => {
+  if (!props.shortcutIndex || props.shortcutIndex > 9) return ''
+  if (isMac) return `⌥${props.shortcutIndex}`
+  if (isWindows) return `Alt+${props.shortcutIndex}`
+  return ''
+})
+const workspaceTab = computed(() =>
+  props.workspaceId ? tabStore.tabs.find(tab => tab.id === props.workspaceId && tab.type === 'workspace') : undefined
+)
+const isMaximized = computed(() => workspaceTab.value?.maximizedPanelId === props.panel.id)
+const maximizeShortcut = computed(() => isMac ? '⌘⇧↩' : isWindows ? 'Ctrl+Shift+Enter' : '')
+const maximizeTitle = computed(() => {
+  const label = t(isMaximized.value ? 'workspace.restorePanel' : 'workspace.maximizePanel')
+  return maximizeShortcut.value ? `${label} (${maximizeShortcut.value})` : label
+})
+
+function toggleMaximize() {
+  if (!props.workspaceId) return
+  tabStore.setActivePanel(props.workspaceId, props.panel.id)
+  tabStore.toggleWorkspacePanelMaximize(props.workspaceId)
+  nextTick(() => baseTerminalRef.value?.focus())
+}
 
 // Human-readable keybinding for a shortcut action ('' when unset), shown as a
 // hint in the panel "..." menu. Reactive via settingsStore, so the hint updates
@@ -472,7 +506,7 @@ async function retryConnection() {
 
   // On first retry, try with existing credentials; on subsequent retries, re-prompt
   const credTypes = ['ssh', 'mosh', 'sftp', 'scp', 'ftp', 'telnet']
-  if (credTypes.includes(props.panel.type) && props.panel.config.authType !== 'key' && props.panel.config.authType !== 'keyText' && retryAttempt > 1) {
+  if (credTypes.includes(props.panel.type) && !['key', 'keyText', 'kerberos'].includes(props.panel.config.authType) && retryAttempt > 1) {
     const result = await showCredentialDialog(
       t('credential.title'),
       props.panel.config.user || props.panel.config.host ? `${props.panel.config.user}@${props.panel.config.host}` : '',
@@ -621,6 +655,13 @@ watch(() => props.panel.outputLog, (val) => {
   white-space: nowrap;
   cursor: text;
 }
+.panel-shortcut {
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
 .panel-icon-wrapper {
   position: relative;
   display: inline-flex;
@@ -669,7 +710,8 @@ watch(() => props.panel.outputLog, (val) => {
   gap: 4px;
   flex-shrink: 0;
 }
-.panel-broadcast {
+.panel-broadcast,
+.panel-maximize {
   background: none;
   border: none;
   color: var(--text-muted);
@@ -679,7 +721,8 @@ watch(() => props.panel.outputLog, (val) => {
   border-radius: 3px;
   line-height: 1;
 }
-.panel-broadcast:hover {
+.panel-broadcast:hover,
+.panel-maximize:hover {
   background: var(--bg-hover);
 }
 .panel-broadcast.active {

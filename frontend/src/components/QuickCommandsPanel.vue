@@ -3,6 +3,7 @@
     <!-- Toolbar: search + actions -->
     <div class="qc-toolbar">
       <el-input
+        ref="searchInputRef"
         v-model="searchQuery"
         :placeholder="t('quickCommands.searchPlaceholder')"
         clearable
@@ -58,14 +59,14 @@
               <div class="qc-item-cmd" :class="{ 'qc-item-cmd-only': !cmd.name }">{{ cmd.command }}</div>
             </div>
             <div v-if="selectedId === cmd.id || hoveredId === cmd.id" class="qc-item-actions">
-              <button class="btn btn-ghost btn-icon btn-sm run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
-                <Play :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
+                <Play :size="16" />
               </button>
-              <button class="btn btn-ghost btn-icon btn-sm paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
-                <Clipboard :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
+                <Clipboard :size="16" />
               </button>
-              <button class="btn btn-ghost btn-icon btn-sm" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
-                <Copy :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
+                <Copy :size="16" />
               </button>
             </div>
           </div>
@@ -92,14 +93,14 @@
             <div class="qc-item-cmd" :class="{ 'qc-item-cmd-only': !cmd.name }">{{ cmd.command }}</div>
           </div>
           <div v-if="selectedId === cmd.id || hoveredId === cmd.id" class="qc-item-actions">
-            <button class="btn btn-ghost btn-icon btn-sm run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
-              <Play :size="14" />
+            <button class="btn btn-ghost btn-icon qc-action-btn run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
+              <Play :size="16" />
             </button>
-            <button class="btn btn-ghost btn-icon btn-sm paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
-              <Clipboard :size="14" />
+            <button class="btn btn-ghost btn-icon qc-action-btn paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
+              <Clipboard :size="16" />
             </button>
-            <button class="btn btn-ghost btn-icon btn-sm" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
-              <Copy :size="14" />
+            <button class="btn btn-ghost btn-icon qc-action-btn" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
+              <Copy :size="16" />
             </button>
           </div>
         </div>
@@ -140,14 +141,14 @@
               <div class="qc-item-cmd" :class="{ 'qc-item-cmd-only': !cmd.name }">{{ cmd.command }}</div>
             </div>
             <div v-if="selectedId === cmd.id || hoveredId === cmd.id" class="qc-item-actions">
-              <button class="btn btn-ghost btn-icon btn-sm run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
-                <Play :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn run" @click.stop="runCommand(cmd)" :title="t('quickCommands.run')">
+                <Play :size="16" />
               </button>
-              <button class="btn btn-ghost btn-icon btn-sm paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
-                <Clipboard :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn paste" @click.stop="pasteCommand(cmd)" :title="t('quickCommands.paste')">
+                <Clipboard :size="16" />
               </button>
-              <button class="btn btn-ghost btn-icon btn-sm" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
-                <Copy :size="14" />
+              <button class="btn btn-ghost btn-icon qc-action-btn" @click.stop="copyCommand(cmd)" :title="t('quickCommands.copy')">
+                <Copy :size="16" />
               </button>
             </div>
           </div>
@@ -253,7 +254,18 @@ const focusedId = ref<string | null>(null)
 const listRef = ref<HTMLDivElement | null>(null)
 const hoveredId = ref<string | null>(null)
 const searchQuery = ref('')
+const searchInputRef = ref<any>(null)
 const expandedGroups = ref<Set<string>>(new Set())
+
+function focusSearch() {
+  const input = searchInputRef.value?.$el?.querySelector('input')
+  if (input instanceof HTMLInputElement) {
+    input.focus()
+    input.select()
+  }
+}
+
+defineExpose({ focusSearch })
 
 const dragOverGroupId = ref<string | null>(null)
 
@@ -588,8 +600,8 @@ watch(searchQuery, (q) => {
 }
 
 .qc-icon-btn {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -709,6 +721,11 @@ watch(searchQuery, (q) => {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+}
+
+.qc-action-btn {
+  width: 30px;
+  height: 30px;
 }
 
 .qc-empty {
