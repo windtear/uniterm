@@ -298,7 +298,7 @@
   "sftp.copy": "Copiar",
   "sftp.cut": "Cortar",
   "sftp.paste": "Pegar",
-  "sftp.selectionStats": "{{count}} item(s) selected",
+  "sftp.selectionStats": "{count} item(s) selected",
   "sftp.newFile": "Nuevo archivo",
   "sftp.dialog.editTitle": "Editar — {path}",
   "sftp.dialog.newFileTitle": "Nuevo archivo",

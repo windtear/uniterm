@@ -612,6 +612,9 @@ const BAND_THRESHOLD = 4
 let bandStart: { x: number; y: number } | null = null
 let bandWrapper: HTMLElement | null = null
 let bandBaseSelection: FileItem[] = []
+// Row elements are cached once per gesture; their rects are still re-measured
+// on every move so a wheel scroll mid-drag stays correct.
+let bandRows: HTMLElement[] = []
 let bandCleanup: (() => void) | null = null
 let bandDownOnRow = false
 let bandJustEnded = false
@@ -647,6 +650,7 @@ function onTableMouseDown(e: MouseEvent) {
   bandWrapper = wrapper
   bandBaseSelection = selectedItems.value
   bandDownOnRow = !!t.closest('tr')
+  bandRows = Array.from(wrapper.querySelectorAll<HTMLElement>('.el-table__body tr'))
 
   const onMove = (ev: MouseEvent) => {
     if (!bandStart || !bandWrapper) return
@@ -681,6 +685,7 @@ function onTableMouseDown(e: MouseEvent) {
     bandRect.value = null
     bandStart = null
     bandWrapper = null
+    bandRows = []
     bandJustEnded = wasBand
     if (!wasBand && !bandDownOnRow) {
       // Plain click on empty space clears the selection; on a row the normal
@@ -702,13 +707,12 @@ function onTableMouseDown(e: MouseEvent) {
 }
 
 function applyBandSelection() {
-  const wrapper = bandWrapper
   const r = bandRect.value
-  if (!wrapper || !r) return
-  const baseRect = wrapper.getBoundingClientRect()
-  const rows = Array.from(wrapper.querySelectorAll<HTMLElement>('.el-table__body tr'))
+  if (!bandWrapper || !r) return
+  const baseRect = bandWrapper.getBoundingClientRect()
   const sel: FileItem[] = []
-  rows.forEach(rowEl => {
+  const selNames = new Set<string>()
+  bandRows.forEach(rowEl => {
     const rr = rowEl.getBoundingClientRect()
     const ry = rr.top - baseRect.top
     if (ry >= r.y + r.h || ry + rr.height <= r.y) return
@@ -716,12 +720,15 @@ function applyBandSelection() {
     // mapping stays correct even if el-table re-orders rows after a header sort.
     const name = rowEl.querySelector('.file-name')?.textContent?.trim()
     if (!name || name === '..') return // '..' is navigation, never selectable
+    if (selNames.has(name)) return
     const item = visibleFiles.value.find(f => f.name === name)
-    if (item && !sel.some(s => s.name === item.name)) sel.push(item)
+    if (item) {
+      selNames.add(name)
+      sel.push(item)
+    }
   })
   // Union with the pre-drag selection so a drag extends it.
-  const names = new Set(sel.map(s => s.name))
-  selectedItems.value = [...bandBaseSelection.filter(b => !names.has(b.name)), ...sel]
+  selectedItems.value = [...bandBaseSelection.filter(b => !selNames.has(b.name)), ...sel]
   if (sel.length) {
     const lastName = sel[sel.length - 1].name
     lastClickedIndex.value = filteredFiles.value.findIndex(f => f.name === lastName)
