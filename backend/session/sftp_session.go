@@ -59,6 +59,22 @@ func (s *SFTPSession) SetMaxConcurrency(n int) {
 	}
 }
 
+// fileSessionKeepAliveInterval keeps NAT/firewall mappings alive and lets the
+// server's ClientAliveInterval see traffic (SFTP/SCP dropped after short idle
+// periods). Send-only, mirroring SSHSession.startKeepAlive.
+const fileSessionKeepAliveInterval = 60 * time.Second
+
+func startFileSessionKeepAlive(client *ssh.Client, sess func() SessionStatus) {
+	ticker := time.NewTicker(fileSessionKeepAliveInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if client == nil || sess() != StatusConnected {
+			return
+		}
+		_, _, _ = client.SendRequest("keepalive@openssh.com", false, nil)
+	}
+}
+
 func (s *SFTPSession) Connect(config ConnectionConfig) error {
 	s.setStatus(StatusConnecting)
 	s.title = fmt.Sprintf("%s@%s", config.User, config.Host)
@@ -104,6 +120,7 @@ func (s *SFTPSession) Connect(config ConnectionConfig) error {
 	}()
 
 	s.sshClient = client
+	go startFileSessionKeepAlive(client, s.Status)
 	s.sftpClient = sc
 	// Preload remote user/group name maps so list owners show names, not numbers.
 	s.loadUserGroupMaps()
