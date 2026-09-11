@@ -286,6 +286,8 @@ uniTerm/
 - [@iCarrear](https://github.com/iCarrear)
 - [@boltomli](https://github.com/boltomli)
 - [@kxn](https://github.com/kxn)
+- [@windtear](https://github.com/windtear)
+- [@Sunshow](https://github.com/Sunshow)
 
 ## 开源协议
 

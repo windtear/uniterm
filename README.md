@@ -286,6 +286,8 @@ Thanks to the following people for contributing code and improvements, and to ev
 - [@iCarrear](https://github.com/iCarrear)
 - [@boltomli](https://github.com/boltomli)
 - [@kxn](https://github.com/kxn)
+- [@windtear](https://github.com/windtear)
+- [@Sunshow](https://github.com/Sunshow)
 
 ## License
 
