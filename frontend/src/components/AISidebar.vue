@@ -1,5 +1,5 @@
 <template>
-  <div ref="sidebarEl" class="ai-sidebar" :class="{ collapsed: !aiStore.visible, resizing: isResizing, maximized: isMaximized }" :style="{ width: sidebarWidth + 'px' }">
+  <div ref="sidebarEl" class="ai-sidebar" :class="{ collapsed: !aiStore.visible, resizing: isResizing, maximized: isMaximized }" :style="{ width: sidebarWidth + 'px', '--ai-font-size': settingsStore.settings.ai.fontSize + 'px' }">
     <div class="resize-handle" @mousedown="onResizeStart" />
     <div class="ai-header">
       <span>{{ t('ai.title') }}</span>
@@ -1745,7 +1745,7 @@ defineExpose({ focusInput })
 }
 .ai-editable {
   padding: 12px 16px;
-  font-size: 13px;
+  font-size: var(--ai-font-size, 15px);
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: transparent;

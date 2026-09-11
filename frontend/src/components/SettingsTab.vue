@@ -975,6 +975,21 @@
         <div class="settings-group">
           <div class="setting-card">
             <div class="setting-info">
+              <div class="setting-title">{{ t('settings.aiFontSize') }}</div>
+              <div class="setting-desc">{{ t('settings.aiFontSizeDesc') }}</div>
+            </div>
+            <div class="setting-control">
+              <el-input-number
+                v-model="settingsStore.settings.ai.fontSize"
+                :min="10"
+                :max="24"
+                @change="settingsStore.save()"
+              />
+            </div>
+          </div>
+
+          <div class="setting-card">
+            <div class="setting-info">
               <div class="setting-title">{{ t('settings.maxTurns') }}</div>
               <div class="setting-desc">{{ t('settings.maxTurnsDesc') }}</div>
             </div>

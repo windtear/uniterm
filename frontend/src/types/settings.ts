@@ -136,6 +136,7 @@ export const USER_AGENT_PRESETS: { label: string; value: string }[] = [
 
 export interface AISettings {
   maxTurns: number
+  fontSize: number
   models: AIModelConfig[]
   activeModelId: string
 }
@@ -304,6 +305,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   ai: {
     maxTurns: 20,
+    fontSize: 15,
     models: [
       {
         id: 'model-default',

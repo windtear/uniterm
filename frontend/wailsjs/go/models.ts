@@ -1686,6 +1686,7 @@ export namespace store {
 	
 	export class AISettings {
 	    maxTurns?: number;
+	    fontSize?: number;
 	    models: AIModelConfig[];
 	    activeModelId: string;
 	
@@ -1696,6 +1697,7 @@ export namespace store {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.maxTurns = source["maxTurns"];
+	        this.fontSize = source["fontSize"];
 	        this.models = this.convertValues(source["models"], AIModelConfig);
 	        this.activeModelId = source["activeModelId"];
 	    }

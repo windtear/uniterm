@@ -707,7 +707,7 @@ function sanitizeRenderedHtml(html: string): string {
   min-width: 0;
 }
 .text {
-  font-size: 12px;
+  font-size: var(--ai-font-size, 15px);
   line-height: 1.6;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -759,7 +759,7 @@ function sanitizeRenderedHtml(html: string): string {
   padding: 2px 5px;
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: max(11px, calc(var(--ai-font-size, 15px) - 1px));
   color: var(--accent);
 }
 
