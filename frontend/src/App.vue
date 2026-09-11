@@ -1037,10 +1037,15 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
     if (!tab) return
     if (tab.type === 'workspace') {
       // A workspace holds several panels; the shortcut duplicates the focused
-      // one (a terminal). Feed it to the shared routine as a terminal tab.
+      // one and keeps the duplicate beside it in the same workspace.
       const pid = tabStore.getActivePanelId()
       const panel = pid ? panelStore.getPanel(pid) : undefined
-      if (panel) duplicateSession({ type: 'terminal', panelId: pid, title: panel.title })
+      if (panel) {
+        duplicateSession(
+          { type: 'terminal', panelId: pid, title: panel.title },
+          { workspaceId: tab.id, targetPanelId: pid },
+        )
+      }
       return
     }
     duplicateSession(tab)

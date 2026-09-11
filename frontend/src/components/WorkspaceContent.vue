@@ -28,10 +28,9 @@ import { usePanelStore } from '../stores/panelStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useCompanionStore } from '../stores/companionStore'
 import type { WorkspaceTab } from '../types/workspace'
-import type { ConnectionConfig } from '../types/session'
-import { waitForTerminalSize } from '../services/terminalManager'
+import { useDuplicateSession } from '../composables/useDuplicateSession'
 import PanelGrid from './PanelGrid.vue'
-import { CreateSession, CloseSession, SessionStart } from '../../bindings/github.com/ys-ll/uniterm/app'
+import { CloseSession } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { ElMessageBox } from 'element-plus'
 import { useI18n } from '../i18n'
 
@@ -44,6 +43,7 @@ const panelStore = usePanelStore()
 const sessionStore = useSessionStore()
 const companionStore = useCompanionStore()
 const { t } = useI18n()
+const { duplicateSession } = useDuplicateSession()
 
 async function closePanel(panelId: string) {
   const panel = panelStore.getPanel(panelId)
@@ -80,38 +80,10 @@ function onToggleAiLock(panelId: string) {
 async function onDuplicatePanel(panelId: string) {
   const panel = panelStore.getPanel(panelId)
   if (!panel) return
-
-  const newPanel = panelStore.createPanel(
-    panel.config ? { ...panel.config } as ConnectionConfig : null,
-    panel.type
+  await duplicateSession(
+    { type: 'terminal', panelId, title: panel.title },
+    { workspaceId: props.tab.id, targetPanelId: panelId },
   )
-  panelStore.updateTitle(newPanel.id, panel.title)
-
-  if (panel.config) {
-    try {
-      const config: ConnectionConfig = {
-        ...panel.config,
-        initialCols: 0,
-        initialRows: 0,
-      }
-      const info = await CreateSession(panel.config.type, config)
-      panelStore.bindSession(newPanel.id, info.id)
-      // Create tab AFTER session is bound, so BaseTerminal mounts with valid sessionId
-      const newTab = tabStore.createTerminalTab(newPanel.title, newPanel.id)
-      panelStore.movePanelToTab(newPanel.id, newTab.id)
-      const size = await waitForTerminalSize(info.id)
-      if (size.cols > 0 && size.rows > 0) {
-        config.initialCols = size.cols
-        config.initialRows = size.rows
-      }
-      await SessionStart(info.id, config).catch((e) => {
-        console.error('Failed to start duplicated session:', e)
-        CloseSession(info.id).catch(() => {})
-      })
-    } catch (e) {
-      console.error('Failed to duplicate session:', e)
-    }
-  }
 }
 
 function onRenamePanel(panelId: string, newName: string) {

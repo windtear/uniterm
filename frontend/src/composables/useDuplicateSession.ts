@@ -34,16 +34,19 @@ function resolveSessionType(tabType: string, config: any): string {
  * Duplicate a session/tab. Shared by the tab context menu ("复制会话") and the
  * keyboard shortcut (duplicateSession) so both paths behave identically.
  *
- * The new tab is created right after the session is bound but BEFORE it is
- * started, so the duplicate appears immediately (matching opening from the
- * connection list) while the SSH/PTY handshake runs in the background.
+ * The new tab or workspace panel is created right after the session is bound
+ * but BEFORE it is started, so the duplicate appears immediately while the
+ * SSH/PTY handshake runs in the background.
  */
 export function useDuplicateSession() {
   const panelStore = usePanelStore()
   const tabStore = useTabStore()
   const sessionStore = useSessionStore()
 
-  async function duplicateSession(tab: any) {
+  async function duplicateSession(
+    tab: any,
+    targetWorkspace?: { workspaceId: string; targetPanelId?: string },
+  ) {
     if (!tab || !('panelId' in tab)) return
     const panel = panelStore.getPanel(tab.panelId)
     if (!panel) return
@@ -97,13 +100,22 @@ export function useDuplicateSession() {
       }
     }
 
-    // Create the tab now that the session is bound but BEFORE it is started, so
-    // the duplicate appears immediately (matching first-open) while the SSH/PTY
-    // handshake runs in the background — previously SessionStart was awaited
-    // first, so the tab only appeared after the whole connection established.
+    // Mount the duplicate now that the session is bound but BEFORE it is
+    // started, either beside the source panel or in a standalone tab.
     let newTab
     if (tab.type === 'terminal') {
-      newTab = tabStore.createTerminalTab(newPanel.title, newPanel.id)
+      const addedToWorkspace = targetWorkspace
+        ? tabStore.addNewPanelToWorkspace(
+            targetWorkspace.workspaceId,
+            newPanel.id,
+            targetWorkspace.targetPanelId,
+          )
+        : false
+      if (addedToWorkspace) {
+        panelStore.movePanelToTab(newPanel.id, targetWorkspace!.workspaceId)
+      } else {
+        newTab = tabStore.createTerminalTab(newPanel.title, newPanel.id)
+      }
     } else if (tab.type === 'sftp') {
       newTab = tabStore.createFtpTab(newPanel.title, newPanel.id)
     } else if (tab.type === 'database' || tab.type === 'mongodb' || tab.type === 'redis') {
@@ -112,7 +124,7 @@ export function useDuplicateSession() {
     } else {
       return
     }
-    panelStore.movePanelToTab(newPanel.id, newTab.id)
+    if (newTab) panelStore.movePanelToTab(newPanel.id, newTab.id)
 
     // Start the connection after the tab is visible. The terminal has now
     // mounted (with its sessionId bound), so waitForTerminalSize resolves with
