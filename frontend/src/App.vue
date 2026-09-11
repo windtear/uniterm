@@ -998,7 +998,12 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
 }
 
 function applyKeybindings() {
-  loadKeybindings(settingsStore.settings.keyboard, actionHandlers)
+  // Modifier+digit tab jumping (Alt+1 … Alt+9, Alt+0 = tenth tab): the digit
+  // is 1-based into the visible tab strip; out-of-range digits do nothing.
+  loadKeybindings(settingsStore.settings.keyboard, actionHandlers, (index) => {
+    const tab = tabStore.tabs[index - 1]
+    if (tab) tabStore.setActiveTab(tab.id)
+  })
 }
 
 onUnmounted(() => {

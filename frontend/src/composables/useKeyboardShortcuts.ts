@@ -48,14 +48,27 @@ const terminalShortcutMap = new Map<string, () => void>()
 // Reverse lookup: action → key combo (for display / dedup)
 const actionKeyMap = new Map<ShortcutAction, string>()
 
+// "Modifier + digit" tab switching: the configured combo held together with
+// 1-9 (or 0 = tenth tab) jumps to that tab. Not a per-action binding — the
+// user configures only the modifier (see KeyboardSettings.tabSwitchModifier),
+// and the digit selects the tab. A null modifier disables the feature.
+let tabSwitchModifier: KeyBinding | null = null
+let tabSwitchHandler: ((index: number) => void) | null = null
+
 // Actions that should only take effect while a terminal session is focused.
 const TERMINAL_SCOPED_ACTIONS: ShortcutAction[] = ['copy', 'paste']
 
-export function loadKeybindings(bindings: KeyboardSettings, handlers: ActionHandlers) {
+export function loadKeybindings(
+  bindings: KeyboardSettings,
+  handlers: ActionHandlers,
+  onTabSwitch?: (index: number) => void,
+) {
   shortcutMap.clear()
   terminalShortcutMap.clear()
   actionKeyMap.clear()
   for (const [action, b] of Object.entries(bindings) as [ShortcutAction, KeyBinding][]) {
+    // Handled below, not through the per-action maps.
+    if (action === ('tabSwitchModifier' as ShortcutAction)) continue
     const key = bindingKey(b)
     if (!key) continue
     const handler = handlers[action]
@@ -68,6 +81,10 @@ export function loadKeybindings(bindings: KeyboardSettings, handlers: ActionHand
       actionKeyMap.set(action, key)
     }
   }
+  tabSwitchHandler = onTabSwitch ?? null
+  const mod = bindings.tabSwitchModifier
+  // Require at least one modifier so a cleared binding can't swallow digits.
+  tabSwitchModifier = mod && (mod.ctrl || mod.meta || mod.shift || mod.alt) ? mod : null
 }
 
 export function getActionKey(action: ShortcutAction): string {
@@ -83,14 +100,34 @@ function fire(e: KeyboardEvent, normalized: string, map: Map<string, () => void>
   return true
 }
 
+// Exact-match the event's modifier flags against the configured combo (an
+// accidental extra modifier must not trigger a jump), then map the digit to a
+// 1-based tab index: 1-9 → tabs 1-9, 0 → tab 10.
+function tryTabSwitch(e: KeyboardEvent): boolean {
+  if (!tabSwitchModifier || !tabSwitchHandler) return false
+  // Composition keystrokes (CJK IME candidate picking) must never jump tabs —
+  // mirrors the global IME guard in main.ts (keyCode 229 = WKWebView phantom).
+  if (e.isComposing || e.keyCode === 229) return false
+  const m = tabSwitchModifier
+  if (e.ctrlKey !== !!m.ctrl || e.metaKey !== !!m.meta
+    || e.shiftKey !== !!m.shift || e.altKey !== !!m.alt) return false
+  if (!/^[0-9]$/.test(e.key)) return false
+  tabSwitchHandler(e.key === '0' ? 10 : Number(e.key))
+  e.preventDefault()
+  e.stopPropagation()
+  return true
+}
+
 export function onGlobalKeydown(e: KeyboardEvent) {
-  fire(e, normalize(e), shortcutMap)
+  if (fire(e, normalize(e), shortcutMap)) return
+  tryTabSwitch(e)
 }
 
 export function onTerminalKey(e: KeyboardEvent): boolean {
   const normalized = normalize(e)
   if (fire(e, normalized, shortcutMap)) return false
   if (fire(e, normalized, terminalShortcutMap)) return false
+  if (tryTabSwitch(e)) return false
   return true
 }
 
