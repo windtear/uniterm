@@ -534,7 +534,7 @@ func (s *FTPSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
 	s.emitTransferComplete(task)
 	return nil
@@ -548,7 +548,7 @@ func (s *FTPSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})

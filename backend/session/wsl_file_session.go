@@ -692,7 +692,7 @@ func (s *WSLFileSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	t.paused = true
+	t.setPaused(true)
 	t.Status = "paused"
 	s.emitTransferComplete(t)
 	return nil
@@ -705,7 +705,7 @@ func (s *WSLFileSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	t.paused = false
+	t.setPaused(false)
 	t.Status = "running"
 	close(t.pauseCh)
 	t.pauseCh = make(chan struct{})

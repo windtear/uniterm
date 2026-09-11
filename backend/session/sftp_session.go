@@ -296,7 +296,10 @@ type TransferTask struct {
 
 	ctx     context.Context
 	cancel  context.CancelFunc
-	paused  bool
+	// paused is read by transfer worker goroutines (waitIfPaused) and written
+	// by the frontend-driven Pause/Resume entry points on other goroutines, so
+	// it is an atomic rather than a plain bool (was a data race).
+	paused  atomic.Bool
 	pauseCh chan struct{}
 }
 
@@ -367,9 +370,12 @@ func (t *TransferTask) done() {
 	}
 }
 
+func (t *TransferTask) setPaused(v bool) { t.paused.Store(v) }
+func (t *TransferTask) isPaused() bool   { return t.paused.Load() }
+
 func (t *TransferTask) waitIfPaused() {
 	for {
-		if t.paused {
+		if t.isPaused() {
 			select {
 			case <-t.pauseCh:
 				continue
@@ -1006,13 +1012,15 @@ func (s *SFTPSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
-	s.emitTransferComplete(task)
+	s.emitTransferPaused(task)
 	return nil
 }
 
-// ResumeTransfer resumes a paused transfer task.
+// ResumeTransfer resumes a paused transfer task. It is rejected unless the
+// task is actually paused ("task not active"), so a stale or finished task
+// cannot be resumed into a bogus running state.
 func (s *SFTPSession) ResumeTransfer(taskID string) error {
 	s.mu.Lock()
 	task, ok := s.transfers[taskID]
@@ -1020,11 +1028,14 @@ func (s *SFTPSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	if task.Status != "paused" {
+		return fmt.Errorf("task not active: %s", taskID)
+	}
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})
-	s.emitTransferStart(task)
+	s.emitTransferResumed(task)
 	return nil
 }
 

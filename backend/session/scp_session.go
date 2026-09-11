@@ -1509,12 +1509,15 @@ func (s *SCPSession) PauseTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = true
+	task.setPaused(true)
 	task.Status = "paused"
-	s.emitTransferComplete(task)
+	s.emitTransferPaused(task)
 	return nil
 }
 
+// ResumeTransfer resumes a paused transfer task. It is rejected unless the
+// task is actually paused ("task not active"), so a stale or finished task
+// cannot be resumed into a bogus running state.
 func (s *SCPSession) ResumeTransfer(taskID string) error {
 	s.mu.Lock()
 	task, ok := s.transfers[taskID]
@@ -1522,10 +1525,13 @@ func (s *SCPSession) ResumeTransfer(taskID string) error {
 	if !ok {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	task.paused = false
+	if task.Status != "paused" {
+		return fmt.Errorf("task not active: %s", taskID)
+	}
+	task.setPaused(false)
 	task.Status = "running"
 	close(task.pauseCh)
 	task.pauseCh = make(chan struct{})
-	s.emitTransferStart(task)
+	s.emitTransferResumed(task)
 	return nil
 }

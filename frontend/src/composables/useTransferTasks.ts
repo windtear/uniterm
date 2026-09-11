@@ -111,6 +111,17 @@ export function useTransferTaskEvents(
           else t.files.push({ path: msg.file, status: 'failed' })
           t.failedFiles.push({ path: msg.file, error: msg.error })
         }
+      } else if (msg.event === 'paused') {
+        const t = tasks.find(t => t.id === msg.taskId)
+        if (t) t.status = 'paused'
+      } else if (msg.event === 'resumed') {
+        const t = tasks.find(t => t.id === msg.taskId)
+        if (t) {
+          t.status = 'running'
+          // Reset the speed baseline so the pause duration doesn't skew the
+          // next speed/eta sample.
+          t.lastTime = Date.now()
+        }
       } else if (msg.event === 'complete') {
         const existing = tasks.find(t => t.id === msg.taskId)
         if (existing) {

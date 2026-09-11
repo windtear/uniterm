@@ -88,6 +88,21 @@ func (s *baseSession) emitTransferComplete(task *TransferTask) {
 	s.emitTransferPayload(payload)
 }
 
+// emitTransferPaused reports that a transfer was paused. Unlike the old
+// "complete" + status "paused" event this never looks finished to the UI.
+func (s *baseSession) emitTransferPaused(task *TransferTask) {
+	s.emitTransferPayload(map[string]any{
+		"taskId": task.ID, "event": "paused",
+	})
+}
+
+// emitTransferResumed reports that a paused transfer is running again.
+func (s *baseSession) emitTransferResumed(task *TransferTask) {
+	s.emitTransferPayload(map[string]any{
+		"taskId": task.ID, "event": "resumed",
+	})
+}
+
 // emitTransferEvent reports a task-level error (event "complete", status "error").
 func (s *baseSession) emitTransferEvent(task *TransferTask, err error) {
 	task.Status = "error"

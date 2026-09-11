@@ -58,4 +58,18 @@ describe('useTransferTaskEvents', () => {
     expect(tasks[0].files.find((f: any) => f.path === 'b.txt').status).toBe('failed')
     expect(tasks[0].failedFiles).toContainEqual({ path: 'b.txt', error: 'permission denied' })
   })
+
+  it('maps paused/resumed events onto task status without finishing the task', () => {
+    const tasks: any[] = []
+    const onDone = vi.fn()
+    const { bind } = useTransferTaskEvents(() => tasks, () => 'sid-1', onDone)
+    bind()
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-7', event: 'start', tfType: 'upload', name: 'big.bin', total: 100 })
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-7', event: 'paused' })
+    expect(tasks[0].status).toBe('paused')
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-7', event: 'resumed' })
+    expect(tasks[0].status).toBe('running')
+    // Pause/resume is not a completion: the finished callback must not fire.
+    expect(onDone).not.toHaveBeenCalled()
+  })
 })
