@@ -42,7 +42,7 @@
       <span class="selection-info">{{ t('sftp.selectionStats', { count: selectionStats.count }) }}</span>
       <span v-if="selectionStats.size > 0">{{ formatSize(selectionStats.size) }}</span>
     </div>
-    <div class="table-wrapper" @contextmenu.prevent="onEmptyAreaContextMenu">
+    <div class="table-wrapper" @contextmenu.prevent="onEmptyAreaContextMenu" @mousedown="onTableMouseDown">
       <div v-if="loading || pasteLoading" class="loading-overlay">
         <div class="loading-content">
           <div class="loading-spinner"></div>
@@ -104,6 +104,11 @@
         </template>
       </el-table-column>
     </el-table>
+    <div
+      v-if="bandRect"
+      class="band-rect"
+      :style="{ left: bandRect.x + 'px', top: bandRect.y + 'px', width: bandRect.w + 'px', height: bandRect.h + 'px' }"
+    />
     </div>
 
     <Menu ref="ctxMenuRef" v-model:visible="ctxMenuVisible" @contextmenu.stop v-slot="{ current }">
@@ -177,7 +182,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Folder, File, Link, RefreshCw, Eye, Upload, MoreHorizontal } from '@lucide/vue'
 import { useI18n } from '../i18n'
 import PathBreadcrumb from './PathBreadcrumb.vue'
@@ -488,6 +493,12 @@ function sortByType(a: FileItem, b: FileItem): number {
 }
 
 function onRowClick(row: FileItem, _column: any, event: MouseEvent) {
+  // A rubber band that starts and ends on the same row still produces a click
+  // event after its mouseup; never let that click clobber the band's result.
+  if (bandJustEnded) {
+    bandJustEnded = false
+    return
+  }
   const index = filteredFiles.value.findIndex(f => f.name === row.name)
   if (event.ctrlKey || event.metaKey) {
     const idx = selectedItems.value.findIndex(s => s.name === row.name)
@@ -588,6 +599,134 @@ function onDragStart(event: DragEvent, row: FileItem) {
     }))
   }
 }
+
+// --- Rubber-band selection (drag to select) ---------------------------------
+// Press the left button anywhere in the table body (a non-name cell or empty
+// space) and drag: a translucent band follows the cursor and every rendered
+// row it intersects is added to the selection, unioned with what was already
+// selected before the drag. A press below the 4px drag threshold is a plain
+// click and keeps the normal row-click / empty-area behavior.
+
+const bandRect = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+const BAND_THRESHOLD = 4
+let bandStart: { x: number; y: number } | null = null
+let bandWrapper: HTMLElement | null = null
+let bandBaseSelection: FileItem[] = []
+let bandCleanup: (() => void) | null = null
+let bandDownOnRow = false
+let bandJustEnded = false
+let bandPrevUserSelect: string | null = null
+
+onBeforeUnmount(() => {
+  // Never leak the document-level listeners if the component unmounts
+  // mid-drag (e.g. the host switches tabs while the button is held).
+  bandCleanup?.()
+  bandCleanup = null
+})
+
+function onTableMouseDown(e: MouseEvent) {
+  bandJustEnded = false
+  if (bandCleanup) return
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return
+  if (props.loading || props.pasteLoading) return
+  const t = e.target as HTMLElement
+  if (!t.closest) return
+  // Keep interactive controls and the custom scrollbar gestures intact.
+  if (t.closest('input, textarea, button, .el-checkbox, .el-scrollbar__bar')) return
+  // Keep header sort / column-resize gestures intact.
+  if (t.closest('th')) return
+  // The name cell owns the native HTML5 row drag (the application/sftp-file
+  // payload dragged between panes). A band starting there would race the
+  // native drag, so band-dragging starts on any other cell or empty space.
+  if (t.closest('.name-cell')) return
+  const wrap = scrollWrapEl
+  if (!wrap) return
+
+  const wrapper = e.currentTarget as HTMLElement
+  bandStart = { x: e.clientX, y: e.clientY }
+  bandWrapper = wrapper
+  bandBaseSelection = selectedItems.value
+  bandDownOnRow = !!t.closest('tr')
+
+  const onMove = (ev: MouseEvent) => {
+    if (!bandStart || !bandWrapper) return
+    const dx = ev.clientX - bandStart.x
+    const dy = ev.clientY - bandStart.y
+    if (!bandRect.value && Math.abs(dx) < BAND_THRESHOLD && Math.abs(dy) < BAND_THRESHOLD) return
+    if (bandPrevUserSelect === null) {
+      // Suppress native text selection while the band sweeps the rows.
+      bandPrevUserSelect = document.body.style.userSelect
+      document.body.style.userSelect = 'none'
+    }
+    // The overlay is anchored to .table-wrapper (its positioning context) and
+    // nothing scrolls under the band during a drag, so viewport-relative
+    // coordinates measured against the wrapper are used for both the overlay
+    // and the row intersection test.
+    const baseRect = bandWrapper.getBoundingClientRect()
+    const x0 = Math.min(bandStart.x, ev.clientX)
+    const y0 = Math.min(bandStart.y, ev.clientY)
+    bandRect.value = {
+      x: x0 - baseRect.left,
+      y: y0 - baseRect.top,
+      w: Math.abs(dx),
+      h: Math.abs(dy),
+    }
+    applyBandSelection()
+  }
+
+  const onUp = () => {
+    bandCleanup?.()
+    bandCleanup = null
+    const wasBand = !!bandRect.value
+    bandRect.value = null
+    bandStart = null
+    bandWrapper = null
+    bandJustEnded = wasBand
+    if (!wasBand && !bandDownOnRow) {
+      // Plain click on empty space clears the selection; on a row the normal
+      // row-click handler takes over.
+      selectedItems.value = []
+    }
+  }
+
+  bandCleanup = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    if (bandPrevUserSelect !== null) {
+      document.body.style.userSelect = bandPrevUserSelect
+      bandPrevUserSelect = null
+    }
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
+function applyBandSelection() {
+  const wrapper = bandWrapper
+  const r = bandRect.value
+  if (!wrapper || !r) return
+  const baseRect = wrapper.getBoundingClientRect()
+  const rows = Array.from(wrapper.querySelectorAll<HTMLElement>('.el-table__body tr'))
+  const sel: FileItem[] = []
+  rows.forEach(rowEl => {
+    const rr = rowEl.getBoundingClientRect()
+    const ry = rr.top - baseRect.top
+    if (ry >= r.y + r.h || ry + rr.height <= r.y) return
+    // Resolve the row through its file name rather than its DOM index, so the
+    // mapping stays correct even if el-table re-orders rows after a header sort.
+    const name = rowEl.querySelector('.file-name')?.textContent?.trim()
+    if (!name || name === '..') return // '..' is navigation, never selectable
+    const item = visibleFiles.value.find(f => f.name === name)
+    if (item && !sel.some(s => s.name === item.name)) sel.push(item)
+  })
+  // Union with the pre-drag selection so a drag extends it.
+  const names = new Set(sel.map(s => s.name))
+  selectedItems.value = [...bandBaseSelection.filter(b => !names.has(b.name)), ...sel]
+  if (sel.length) {
+    const lastName = sel[sel.length - 1].name
+    lastClickedIndex.value = filteredFiles.value.findIndex(f => f.name === lastName)
+  }
+}
 </script>
 
 <style scoped>
@@ -678,6 +817,13 @@ function onDragStart(event: DragEvent, row: FileItem) {
 }
 .selection-info {
   flex: 1;
+}
+.band-rect {
+  position: absolute;
+  z-index: 20;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
 }
 .name-cell {
   display: flex;
