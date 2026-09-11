@@ -61,6 +61,26 @@ func TestOSC7ScannerEmptyHostBEL(t *testing.T) {
 	}
 }
 
+// Reproduced in the field (dev log): real prompts emit the ST-terminated OSC-7
+// immediately followed by a BEL-terminated OSC-0 title sequence. The scanner
+// must terminate the OSC-7 payload at the FIRST terminator (ST here), not at
+// the later BEL — swallowing "\x1b\\" plus the whole title into the payload
+// produced a garbage cwd and disabled path following entirely.
+func TestOSC7ScannerSTTerminatedBeforeFollowingOSC0(t *testing.T) {
+	var sc osc7Scanner
+	input := "\x1b]7;file:///root\x1b\\\x1b]0;root@localhost:~\x07"
+	cwd, cleaned, found := sc.Feed([]byte(input))
+	if !found || cwd != "/root" {
+		t.Fatalf("cwd=%q found=%v, want /root", cwd, found)
+	}
+	if !strings.Contains(string(cleaned), "\x1b]0;root@localhost:~\x07") {
+		t.Fatalf("following OSC-0 title must pass through to the display: %q", cleaned)
+	}
+	if strings.Contains(string(cleaned), "\x1b]7;") {
+		t.Fatal("cleaned output still contains the OSC-7 sequence")
+	}
+}
+
 func TestBashBootstrapChainsUserRc(t *testing.T) {
 	files, args, ok := buildShellBootstrap("/bin/bash")
 	if !ok {

@@ -73,11 +73,17 @@ func (sc *osc7Scanner) Feed(data []byte) (cwd string, cleaned []byte, found bool
 		}
 		out = append(out, buf[:i]...)
 		rest := buf[i+len(osc7Prefix):]
-		end := bytes.IndexByte(rest, osc7BEL[0])
-		termLen := 1
-		if end < 0 {
-			end = bytes.Index(rest, []byte(osc7ST))
-			termLen = len(osc7ST)
+		// The payload ends at whichever terminator comes FIRST. Real prompts
+		// emit an ST-terminated OSC-7 immediately followed by a BEL-terminated
+		// OSC-0 title; searching for BEL first would swallow the ST plus the
+		// whole title into the payload (field-reproduced).
+		belIdx := bytes.IndexByte(rest, osc7BEL[0])
+		stIdx := bytes.Index(rest, []byte(osc7ST))
+		end, termLen := -1, 0
+		if belIdx >= 0 && (stIdx < 0 || belIdx < stIdx) {
+			end, termLen = belIdx, 1
+		} else if stIdx >= 0 {
+			end, termLen = stIdx, len(osc7ST)
 		}
 		if end < 0 {
 			// Terminator not yet arrived: hold everything from the sequence
@@ -189,8 +195,10 @@ func injectShellIntegration(client *ssh.Client) string {
 		return ""
 	}
 	shell = strings.TrimSpace(shell)
+	log.Writef("ssh: shell integration detected remote shell %q", shell)
 	files, args, ok := buildShellBootstrap(shell)
 	if !ok {
+		log.Writef("ssh: shell integration unsupported shell %q", shell)
 		return ""
 	}
 	switch shellBasename(shell) {

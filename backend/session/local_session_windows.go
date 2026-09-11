@@ -388,6 +388,7 @@ func wslShellIntegration(distro string) (startArgs []string, ok bool) {
 			return nil, false
 		}
 	}
+	log.Writef("wsl: shell integration injected for %s (shell %s, args %v)", distro, shell, startArgs)
 	return startArgs, true
 }
 
