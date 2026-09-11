@@ -49,6 +49,7 @@
           @mkdir="onMkdir"
           @symlink="onSymlink"
           :supports-symlink="true"
+          show-copy-path-to-terminal
           @chmod="onChmod"
           @send-to-other="onDownloadTo"
           @edit="onEditFile"

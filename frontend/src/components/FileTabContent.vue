@@ -47,7 +47,6 @@
           @save-bookmark="onLocalSaveBookmark"
           @remove-bookmark="onLocalRemoveBookmark"
           toolbar-layout="flat"
-          @copy-path-to-terminal="onCopyPathToTerminal"
         />
       </div>
       <div
@@ -102,7 +101,6 @@
           @save-bookmark="onSaveBookmark"
           @remove-bookmark="onRemoveBookmark"
           toolbar-layout="flat"
-          @copy-path-to-terminal="onCopyPathToTerminal"
         />
       </div>
     </div>
@@ -198,8 +196,6 @@ import {
 } from '../composables/useFilePanel'
 import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/usePanelReconnect'
 import { isConnectionLostError, supportsRemoteSymlink } from '../utils/fileTransferUtils'
-import { queuedSessionWrite } from '../services/sessionWriter'
-import type { PanelType } from '../types/workspace'
 import { bindExtEditUploadedToast } from '../composables/useFilePanel'
 import { Events } from '@wailsio/runtime'
 import { ChevronDown } from '@lucide/vue'
@@ -536,28 +532,6 @@ async function doInitialAutoNav() {
   if (target) {
     await onRemoteNavigate(target)
   }
-}
-
-// "Copy path to terminal" (FileList context menu): the clipboard write already
-// happened in FileList. Additionally, type the path at the prompt of the
-// terminal that belongs to the same connection as this file session. A file
-// panel is a separate session of the same connection, so the owning terminal is
-// found by matching the connection id across terminal-like panels; without one
-// this silently no-ops (the clipboard copy still applies).
-const TERMINAL_PANEL_TYPES: PanelType[] = ['ssh', 'local', 'wsl']
-
-function onCopyPathToTerminal(text: string) {
-  const myConfigId = panel.value?.config?.id
-  if (!myConfigId) return
-  const terminal = [...panelStore.panels.values()].find(p =>
-    p.id !== props.panelId &&
-    p.sessionId &&
-    TERMINAL_PANEL_TYPES.includes(p.type) &&
-    p.config?.id === myConfigId,
-  )
-  if (!terminal?.sessionId) return
-  // Path only — no trailing newline, so the user can complete the command.
-  queuedSessionWrite(terminal.sessionId, text)
 }
 
 // Send-to-other (context menu) and cross-pane drag-drop share one transfer

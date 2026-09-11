@@ -13,13 +13,15 @@
        
         clearable
       />
-      <button class="filter-icon-btn" :disabled="!canBack" @click="emit('back')" :title="t('sftp.back')">
+      <!-- History navigation: toolbar buttons in the flat (dual-pane) layout,
+           menu entries in the compact (sidebar) layout. -->
+      <button v-if="flatToolbar" class="filter-icon-btn" :disabled="!canBack" @click="emit('back')" :title="t('sftp.back')">
         <el-icon><ChevronLeft :size="14" /></el-icon>
       </button>
-      <button class="filter-icon-btn" :disabled="!canForward" @click="emit('forward')" :title="t('sftp.forward')">
+      <button v-if="flatToolbar" class="filter-icon-btn" :disabled="!canForward" @click="emit('forward')" :title="t('sftp.forward')">
         <el-icon><ChevronRight :size="14" /></el-icon>
       </button>
-      <button class="filter-icon-btn" @click="emit('up')" :title="t('sftp.goUp')">
+      <button v-if="flatToolbar" class="filter-icon-btn" @click="emit('up')" :title="t('sftp.goUp')">
         <el-icon><CornerLeftUp :size="14" /></el-icon>
       </button>
       <button class="filter-icon-btn" @click="emit('refresh')" :title="t('sftp.refresh')">
@@ -29,16 +31,7 @@
         <el-icon><Upload :size="14" /></el-icon>
       </button>
       <!-- Flat toolbar (toolbarLayout="flat"): the more-menu's create actions are
-           also surfaced as icon buttons, plus a selection-driven download. -->
-      <button
-        v-if="mode === 'remote' && flatToolbar"
-        class="filter-icon-btn"
-        :disabled="selectionStats.count === 0"
-        @click="emit('downloadTo', [...selectedItems])"
-        :title="t('sftp.downloadTo')"
-      >
-        <el-icon><Download :size="14" /></el-icon>
-      </button>
+           also surfaced as icon buttons. -->
       <button v-if="flatToolbar" class="filter-icon-btn" @click="doNewFile" :title="t('sftp.newFile')">
         <el-icon><FilePlus2 :size="14" /></el-icon>
       </button>
@@ -151,7 +144,7 @@
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
           <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
-          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
+          <MenuItem v-if="showCopyPathToTerminal" @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doRename">{{ t('sftp.rename') }}</MenuItem>
@@ -169,7 +162,7 @@
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
           <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
-          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
+          <MenuItem v-if="showCopyPathToTerminal" @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem @click="doRename">{{ t('sftp.rename') }}</MenuItem>
@@ -183,7 +176,7 @@
           <MenuDivider />
           <MenuItem v-if="props.showSendToOther !== false" @click="doSendToOther">{{ t(sendToKey) }}</MenuItem>
           <MenuItem @click="doCopyPath">{{ t('sftp.copyPath') }}</MenuItem>
-          <MenuItem @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
+          <MenuItem v-if="showCopyPathToTerminal" @click="doCopyPathToTerminal">{{ t('sftp.copyPathToTerminal') }}</MenuItem>
           <MenuItem v-if="mode === 'remote'" @click="doDownloadTo">{{ t('sftp.downloadTo') }}</MenuItem>
           <MenuDivider />
           <MenuItem v-if="mode === 'remote'" class="disabled">{{ t('sftp.renameDisabled') }}</MenuItem>
@@ -201,8 +194,17 @@
     </Menu>
 
     <Menu ref="moreMenuRef" v-model:visible="moreMenuVisible">
-      <MenuItem @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
-      <MenuItem @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
+      <!-- Compact (sidebar) layout: history navigation lives here instead of
+           the narrow toolbar. Flat keeps it as toolbar buttons — toolbar
+           actions are never duplicated into this menu. -->
+      <template v-if="!flatToolbar">
+        <MenuItem :class="{ disabled: !canBack }" @click="canBack && emit('back')">{{ t('sftp.back') }}</MenuItem>
+        <MenuItem :class="{ disabled: !canForward }" @click="canForward && emit('forward')">{{ t('sftp.forward') }}</MenuItem>
+        <MenuItem @click="emit('up')">{{ t('sftp.goUp') }}</MenuItem>
+        <MenuDivider />
+      </template>
+      <MenuItem v-if="!flatToolbar" @click="doNewFile">{{ t('sftp.newFile') }}</MenuItem>
+      <MenuItem v-if="!flatToolbar" @click="doMkdir">{{ t('sftp.newDirectory') }}</MenuItem>
       <MenuItem v-if="supportsSymlink" @click="doSymlink">{{ t('sftp.newLink') }}</MenuItem>
       <MenuDivider />
       <MenuItem class="iconic" :class="{ active: showHidden }" @click="toggleShowHidden">
@@ -215,7 +217,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { Folder, File, Link, RefreshCw, Eye, Upload, Download, FilePlus2, FolderPlus, MoreHorizontal, ChevronLeft, ChevronRight, CornerLeftUp } from '@lucide/vue'
+import { Folder, File, Link, RefreshCw, Eye, Upload, FilePlus2, FolderPlus, MoreHorizontal, ChevronLeft, ChevronRight, CornerLeftUp } from '@lucide/vue'
 import { useI18n } from '../i18n'
 import { msg } from '../services/message'
 import { joinPath } from '../composables/useFilePanel'
@@ -247,6 +249,9 @@ const props = defineProps<{
   showSendToOther?: boolean
   /** Show the "new link" (symbolic link) entry — only for backends with link semantics. */
   supportsSymlink?: boolean
+  /** Show the "copy path to terminal" context-menu entry — sidebar hosts only:
+   *  the dual-pane tab has no terminal beside it to receive the path. */
+  showCopyPathToTerminal?: boolean
   breadcrumbMode?: 'local' | 'remote'
   breadcrumbPath?: string
   breadcrumbSavedPaths?: string[]
