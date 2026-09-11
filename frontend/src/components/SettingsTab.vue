@@ -900,6 +900,16 @@
             </tr>
           </thead>
           <tbody>
+            <tr>
+              <td>{{ t('shortcut.switchTabByNumber') }}</td>
+              <td><kbd class="kb-key">{{ fixedDigitShortcutDisplay('tab') }}</kbd></td>
+              <td class="kb-actions">—</td>
+            </tr>
+            <tr>
+              <td>{{ t('shortcut.switchWorkspacePanelByNumber') }}</td>
+              <td><kbd class="kb-key">{{ fixedDigitShortcutDisplay('workspace') }}</kbd></td>
+              <td class="kb-actions">—</td>
+            </tr>
             <tr
               v-for="action in (Object.keys(SHORTCUT_LABELS) as ShortcutAction[])"
               :key="action"
@@ -1495,6 +1505,13 @@ function bindingDisplay(action: ShortcutAction): string {
   const b = settingsStore.settings.keyboard[action]
   if (!b) return ''
   return formatKeyBinding(b, isMac.value)
+}
+
+function fixedDigitShortcutDisplay(action: 'tab' | 'workspace'): string {
+  const modifier = action === 'tab'
+    ? (isMac.value ? 'Cmd' : 'Ctrl')
+    : (isMac.value ? 'Option' : 'Alt')
+  return `${modifier}+1…9 / ${modifier}+0`
 }
 
 function isDefaultBinding(action: ShortcutAction): boolean {

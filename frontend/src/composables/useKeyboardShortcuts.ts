@@ -5,17 +5,29 @@ type ActionHandlers = Record<ShortcutAction, () => void>
 /**
  * Render a KeyBinding as a human-readable combo, e.g. Ctrl+Shift+C.
  * Shared by the settings UI and the terminal context-menu shortcut hints so
- * both show the same format (Cmd on macOS, Meta elsewhere).
+ * both show the same format. Ctrl-based bindings are mirrored to Command by
+ * loadKeybindings on macOS, so render that portable primary modifier as Cmd.
  */
 export function formatKeyBinding(b: KeyBinding, isMac: boolean): string {
   if (!b) return ''
   const parts: string[] = []
-  if (b.ctrl) parts.push('Ctrl')
-  if (b.meta) parts.push(isMac ? 'Cmd' : 'Meta')
+  if (b.ctrl) parts.push(isMac ? 'Cmd' : 'Ctrl')
+  if (b.meta && !b.ctrl) parts.push(isMac ? 'Cmd' : 'Meta')
   if (b.shift) parts.push('Shift')
   if (b.alt) parts.push('Alt')
   parts.push(b.key)
   return parts.join('+')
+}
+
+export function migrateLegacyQuickCommandsBinding(
+  binding: KeyBinding | undefined,
+  isMac: boolean,
+): KeyBinding | undefined {
+  if (isMac || !binding?.meta || binding.ctrl || binding.shift || binding.alt
+    || binding.key.toLowerCase() !== 'k') {
+    return binding
+  }
+  return { ctrl: true, meta: false, shift: false, alt: false, key: 'k' }
 }
 
 function bindingKey(b: KeyBinding): string {
@@ -39,6 +51,32 @@ function normalize(e: KeyboardEvent): string {
   return parts.join('+')
 }
 
+export type PlatformDigitShortcut =
+  | { action: 'tab'; index: number }
+  | { action: 'workspace'; index: number }
+
+// Resolve only exact platform digit combinations. In particular, Alt+N and
+// Ctrl+N are mutually exclusive on Windows and must never select the same UI.
+export function resolvePlatformDigitShortcut(
+  e: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>,
+  isMac: boolean,
+): PlatformDigitShortcut | null {
+  const match = e.code.match(/^Digit([0-9])$/)
+  if (!match || e.shiftKey) return null
+  // Match the conventional terminal shortcut layout: 1…9 select the first
+  // nine entries and 0 selects the tenth.
+  const digit = Number(match[1])
+  const index = digit === 0 ? 9 : digit - 1
+  if (e.altKey && !e.metaKey && !e.ctrlKey) {
+    return { action: 'workspace', index }
+  }
+  const tabModifier = !e.altKey && (
+    (isMac && e.metaKey && !e.ctrlKey) ||
+    (!isMac && e.ctrlKey && !e.metaKey)
+  )
+  return tabModifier ? { action: 'tab', index } : null
+}
+
 // Module-level state: key combo → action handler
 const shortcutMap = new Map<string, () => void>()
 // Terminal-scoped shortcuts: only fire while a terminal session is focused
@@ -54,6 +92,7 @@ const TERMINAL_SCOPED_ACTIONS: ShortcutAction[] = ['copy', 'paste']
 export function loadKeybindings(
   bindings: KeyboardSettings,
   handlers: ActionHandlers,
+  isMac = false,
 ) {
   shortcutMap.clear()
   terminalShortcutMap.clear()
@@ -65,7 +104,7 @@ export function loadKeybindings(
     if (handler) {
       const target = TERMINAL_SCOPED_ACTIONS.includes(action) ? terminalShortcutMap : shortcutMap
       target.set(key, handler)
-      if (!b.meta && b.ctrl) {
+      if (isMac && !b.meta && b.ctrl) {
         target.set(key.replace(/^ctrl\+/, 'meta+'), handler)
       }
       actionKeyMap.set(action, key)
