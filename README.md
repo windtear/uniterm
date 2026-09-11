@@ -81,7 +81,7 @@ Connection management, split panes, cloud sync, themes — your terminal, your w
 | Terminal | Serial | Serial port terminal with configurable baud rate and other parameters |
 | Terminal | Raw TCP | Raw TCP console that opens a plain socket and transceives raw bytes |
 | Terminal | Local | PowerShell, CMD, Git Bash, and other local shells |
-| Terminal | WSL | Open installed WSL distributions via local terminal |
+| Terminal | WSL | Open installed WSL distributions via local terminal (Windows only) |
 | File Transfer | SFTP | Server file management and transfer |
 | File Transfer | SCP (1.9.3-alpha) | Fallback protocol for legacy SSH servers that do not support SFTP |
 | File Transfer | FTP / FTPS | Website hosting, NAS file transfer |
@@ -105,7 +105,7 @@ Connection management, split panes, cloud sync, themes — your terminal, your w
 | Containers | Docker | Container and image management, on the local machine or remote hosts over SSH |
 | Containers | Podman | Docker-compatible container engine, on the local machine or remote hosts over SSH |
 | Containers | nerdctl (containerd) | containerd container management with namespace switching |
-| Containers | WSLC | Windows WSL2 Container runtime |
+| Containers | WSLC | Windows WSL2 Container runtime (Windows only) |
 
 Oracle Database support is implemented with a pure Go driver. uniTerm does not bundle Oracle Database, Oracle Instant Client, OJDBC, wallet files, or Oracle brand assets; users are responsible for their own Oracle licenses, credentials, and database access.
 

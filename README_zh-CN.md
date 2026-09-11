@@ -81,7 +81,7 @@
 | 终端 | Serial | 串口终端连接，支持波特率等参数配置 |
 | 终端 | Raw TCP | 原始 TCP 控制台会话，直连主机端口收发原始字节流 |
 | 终端 | Local | PowerShell、CMD、Git Bash 等本地 Shell |
-| 终端 | WSL | 通过本地终端打开已安装的 WSL 发行版 |
+| 终端 | WSL | 通过本地终端打开已安装的 WSL 发行版（仅 Windows） |
 | 文件传输 | SFTP | 服务器文件管理与传输 |
 | 文件传输 | SCP (1.9.3-alpha) | 兼容旧版 SSH 服务器的降级方案，适用于不支持 SFTP 协议的服务器 |
 | 文件传输 | FTP / FTPS | 网站空间、NAS 文件传输 |
@@ -105,7 +105,7 @@
 | 容器 | Docker | 容器与镜像管理，支持本机或 SSH 远程主机 |
 | 容器 | Podman | 兼容 Docker 的容器引擎，支持本机或 SSH 远程主机 |
 | 容器 | nerdctl (containerd) | containerd 容器管理，支持切换 namespace |
-| 容器 | WSLC | Windows WSL2 Container 运行时 |
+| 容器 | WSLC | Windows WSL2 Container 运行时（仅 Windows） |
 
 Oracle Database 支持基于纯 Go 驱动实现。uniTerm 不随安装包分发 Oracle Database、Oracle Instant Client、OJDBC、Wallet 文件或 Oracle 品牌素材；用户需自行确保其 Oracle 授权、凭据和数据库访问权限合规。
 
