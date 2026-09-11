@@ -732,6 +732,15 @@ func (s *SFTPSession) startDirTransfer(tfType, lp, rp string, skip []string) (st
 		task.fileMu.RLock()
 		failed := task.FailedFiles
 		task.fileMu.RUnlock()
+		if task.ctx.Err() != nil {
+			// Cancelled takes precedence over any per-file failures.
+			task.Status = "cancelled"
+			s.emitTransferComplete(task)
+			s.mu.Lock()
+			delete(s.transfers, task.ID)
+			s.mu.Unlock()
+			return
+		}
 		if derr != nil && len(failed) == 0 {
 			// Walk-level failure (e.g. root ReadDir) with nothing attempted.
 			task.Status = "error"
@@ -742,14 +751,6 @@ func (s *SFTPSession) startDirTransfer(tfType, lp, rp string, skip []string) (st
 			task.Status = "error"
 			s.emitTransferComplete(task)
 			return // kept for retry
-		}
-		if derr != nil { // context cancelled
-			task.Status = "cancelled"
-			s.emitTransferComplete(task)
-			s.mu.Lock()
-			delete(s.transfers, task.ID)
-			s.mu.Unlock()
-			return
 		}
 		task.Status = "done"
 		s.emitTransferProgressForced(task)
@@ -1305,6 +1306,34 @@ func (s *SFTPSession) uploadDir(localDir, remoteDir string, task *TransferTask) 
 	return nil
 }
 
+// transferDirEntry transfers one file of a directory task while holding a
+// concurrency slot, released via defer so a panic cannot leak the slot. The
+// acquire is cancellable: a worker blocked on the semaphore returns without
+// transferring when the task is cancelled.
+func (s *SFTPSession) transferDirEntry(task *TransferTask, e dirEntry2, tfType string) {
+	if s.sem != nil {
+		select {
+		case s.sem <- struct{}{}:
+			defer func() { <-s.sem }()
+		case <-task.ctx.Done():
+			return
+		}
+	}
+	s.emitFileStart(task, e.rel, filepath.Base(e.rel))
+	task.beginFile(e.rel)
+	err := s.transferFile(task, e.lp, e.rp, tfType)
+	if err != nil && task.ctx.Err() != nil {
+		task.clearCurrent(e.rel) // cancelled mid-file: not a file failure
+	} else if err != nil {
+		task.failFile(e.rel, err)
+		s.emitFileFailed(task, e.rel, err)
+	} else {
+		task.finishFile(e.rel)
+		s.emitFileDone(task, e.rel)
+	}
+	s.emitTransferProgress(task)
+}
+
 // runTransferPool processes files through a bounded worker pool. Bounded by
 // the connection's SftpMaxConcurrency (its semaphore); defaults to 4 workers
 // when the session has no semaphore set.
@@ -1336,25 +1365,7 @@ func (s *SFTPSession) runTransferPool(task *TransferTask, files []dirEntry2, tfT
 					task.finishFile(e.rel)
 					continue
 				}
-				if s.sem != nil {
-					s.sem <- struct{}{}
-				}
-				s.emitFileStart(task, e.rel, filepath.Base(e.rel))
-				task.beginFile(e.rel)
-				err := s.transferFile(task, e.lp, e.rp, tfType)
-				if s.sem != nil {
-					<-s.sem
-				}
-				if err != nil && task.ctx.Err() != nil {
-					task.clearCurrent(e.rel) // cancelled mid-file: not a file failure
-				} else if err != nil {
-					task.failFile(e.rel, err)
-					s.emitFileFailed(task, e.rel, err)
-				} else {
-					task.finishFile(e.rel)
-					s.emitFileDone(task, e.rel)
-				}
-				s.emitTransferProgress(task)
+				s.transferDirEntry(task, e, tfType)
 			}
 		}()
 	}

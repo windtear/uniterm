@@ -1,8 +1,11 @@
 package session
 
 import (
+	"fmt"
+	"io"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -175,5 +178,124 @@ func TestDirDownloadContinuesAfterPerFileFailure(t *testing.T) {
 	s.mu.RUnlock()
 	if !kept {
 		t.Fatal("failed task was deleted from transfers map")
+	}
+}
+// waitTaskRemoved polls until the task id is gone from s.transfers (deletion
+// happens right after the complete event, so a short deadline-bounded wait is
+// deterministic).
+func waitTaskRemoved(t *testing.T, s *SFTPSession, id string) {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		s.mu.RLock()
+		_, ok := s.transfers[id]
+		s.mu.RUnlock()
+		if !ok {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("task was not removed from transfers map in time")
+}
+
+// TestDirDownloadCancelDuringPool cancels a download while its worker pool is
+// running: the single concurrency slot is held so every worker blocks
+// deterministically at semaphore acquire after the walk has set fileCount.
+func TestDirDownloadCancelDuringPool(t *testing.T) {
+	s, root := newTestSFTPSession(t)
+	events := captureTransferEvents(t)
+	remote := filepath.Join(root, "src")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = 8
+	for i := 0; i < n; i++ {
+		if err := os.WriteFile(filepath.Join(remote, fmt.Sprintf("f%d.txt", i)), []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	local := filepath.Join(root, "out")
+
+	s.SetMaxConcurrency(1)
+	s.sem <- struct{}{} // hold the only slot: workers park at acquire
+
+	id, err := s.startDirTransfer("download", local, remote, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Deterministic gate: fileCount is set when the pool has started.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		s.mu.RLock()
+		task := s.transfers[id]
+		fc := task.fileCount()
+		s.mu.RUnlock()
+		if fc == n {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("worker pool did not start in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := s.CancelTransfer(id); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := waitForTask(t, events, id)
+	if ev["status"] != "cancelled" {
+		t.Fatalf("status = %v, want cancelled", ev["status"])
+	}
+	waitTaskRemoved(t, s, id)
+}
+
+func TestDirUploadHappyPath(t *testing.T) {
+	s, root := newTestSFTPSession(t)
+	events := captureTransferEvents(t)
+	local := filepath.Join(root, "in")
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(local, "a.txt"), []byte("AAA"), 0o644)
+	os.WriteFile(filepath.Join(local, "b.txt"), []byte("BB"), 0o644)
+	os.MkdirAll(filepath.Join(local, "sub"), 0o755)
+	os.WriteFile(filepath.Join(local, "sub", "c.txt"), []byte("C"), 0o644)
+
+	remote := filepath.Join(root, "out")
+	id, err := s.startDirTransfer("upload", local, remote, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := waitForTask(t, events, id)
+	if ev["status"] != "done" {
+		t.Fatalf("status = %v, failed=%v", ev["status"], ev["failedFiles"])
+	}
+	if ev["fileCount"] != 3 || ev["completedFiles"] != 3 {
+		t.Fatalf("fileCount=%v completed=%v", ev["fileCount"], ev["completedFiles"])
+	}
+	waitTaskRemoved(t, s, id) // done tasks are deleted
+
+	readRemote := func(rel string) string {
+		t.Helper()
+		f, err := s.sftpClient.Open(path.Join(remote, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		b, err := io.ReadAll(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if got := readRemote("a.txt"); got != "AAA" {
+		t.Fatalf("a.txt = %q", got)
+	}
+	if got := readRemote("b.txt"); got != "BB" {
+		t.Fatalf("b.txt = %q", got)
+	}
+	if got := readRemote("sub/c.txt"); got != "C" {
+		t.Fatalf("sub/c.txt = %q", got)
 	}
 }
