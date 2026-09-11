@@ -24,22 +24,10 @@
       <button v-if="flatToolbar" class="filter-icon-btn" @click="emit('up')" :title="t('sftp.goUp')">
         <el-icon><CornerLeftUp :size="14" /></el-icon>
       </button>
+      <!-- View group: refresh + hidden-files visibility. -->
+      <span v-if="flatToolbar" class="toolbar-divider" />
       <button class="filter-icon-btn" @click="emit('refresh')" :title="t('sftp.refresh')">
         <el-icon><RefreshCw :size="14" /></el-icon>
-      </button>
-      <button v-if="mode === 'remote'" class="filter-icon-btn" @click="emit('upload')" :title="t('sftp.upload')">
-        <el-icon><Upload :size="14" /></el-icon>
-      </button>
-      <!-- Flat toolbar (toolbarLayout="flat"): every action lives on the bar,
-           so there is no more-menu in this layout. -->
-      <button v-if="flatToolbar" class="filter-icon-btn" @click="doNewFile" :title="t('sftp.newFile')">
-        <el-icon><FilePlus2 :size="14" /></el-icon>
-      </button>
-      <button v-if="flatToolbar" class="filter-icon-btn" @click="doMkdir" :title="t('sftp.newDirectory')">
-        <el-icon><FolderPlus :size="14" /></el-icon>
-      </button>
-      <button v-if="flatToolbar && supportsSymlink" class="filter-icon-btn" @click="doSymlink" :title="t('sftp.newLink')">
-        <el-icon><Link :size="14" /></el-icon>
       </button>
       <button
         v-if="flatToolbar"
@@ -49,6 +37,23 @@
         :title="showHidden ? t('sftp.hideHidden') : t('sftp.showHidden')"
       >
         <el-icon><Eye :size="14" /></el-icon>
+      </button>
+      <!-- Transfer group: upload. -->
+      <span v-if="flatToolbar && mode === 'remote'" class="toolbar-divider" />
+      <button v-if="mode === 'remote'" class="filter-icon-btn" @click="emit('upload')" :title="t('sftp.upload')">
+        <el-icon><Upload :size="14" /></el-icon>
+      </button>
+      <!-- Create group: new file / directory / link. Flat keeps every action
+           on the bar, so there is no more-menu in this layout. -->
+      <span v-if="flatToolbar" class="toolbar-divider" />
+      <button v-if="flatToolbar" class="filter-icon-btn" @click="doNewFile" :title="t('sftp.newFile')">
+        <el-icon><FilePlus2 :size="14" /></el-icon>
+      </button>
+      <button v-if="flatToolbar" class="filter-icon-btn" @click="doMkdir" :title="t('sftp.newDirectory')">
+        <el-icon><FolderPlus :size="14" /></el-icon>
+      </button>
+      <button v-if="flatToolbar && supportsSymlink" class="filter-icon-btn" @click="doSymlink" :title="t('sftp.newLink')">
+        <el-icon><Link :size="14" /></el-icon>
       </button>
       <button v-if="!flatToolbar" class="filter-icon-btn" @click.stop="moreMenuRef?.toggle($event.currentTarget as HTMLElement)" :title="t('sftp.more')">
         <el-icon><MoreHorizontal :size="14" /></el-icon>
@@ -711,6 +716,7 @@ let bandBaseSelection: FileItem[] = []
 let bandRows: HTMLElement[] = []
 let bandCleanup: (() => void) | null = null
 let bandDownOnRow = false
+let bandAdditive = false
 let bandJustEnded = false
 let bandPrevUserSelect: string | null = null
 
@@ -725,9 +731,9 @@ function onTableMouseDown(e: MouseEvent) {
   bandJustEnded = false
   if (bandCleanup) return
   // Ctrl/Cmd starts an ADDITIVE band (existing selection kept, swept rows are
-  // added — applyBandSelection already unions with bandBaseSelection). Shift
-  // stays reserved for the row-click range toggle.
-  const additive = e.ctrlKey || e.metaKey
+  // added — Windows Explorer semantics); a plain band REPLACES the selection.
+  // Shift stays reserved for the row-click range toggle.
+  bandAdditive = e.ctrlKey || e.metaKey
   if (e.button !== 0 || e.shiftKey) return
   if (props.loading || props.pasteLoading) return
   const t = e.target as HTMLElement
@@ -825,8 +831,11 @@ function applyBandSelection() {
       sel.push(item)
     }
   })
-  // Union with the pre-drag selection so a drag extends it.
-  selectedItems.value = [...bandBaseSelection.filter(b => !selNames.has(b.name)), ...sel]
+  // Windows Explorer semantics: a plain band REPLACES the selection; a
+  // Ctrl/Cmd band adds the swept rows to whatever was already selected.
+  selectedItems.value = bandAdditive
+    ? [...bandBaseSelection.filter(b => !selNames.has(b.name)), ...sel]
+    : sel
   if (sel.length) {
     const lastName = sel[sel.length - 1].name
     lastClickedIndex.value = filteredFiles.value.findIndex(f => f.name === lastName)
@@ -874,6 +883,15 @@ function applyBandSelection() {
 }
 .filter-bar .el-input {
   flex: 1;
+}
+/* Vertical separator between flat-toolbar button groups (nav / view /
+   transfer / create). Compact (sidebar) layout has no groups and no dividers. */
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  flex-shrink: 0;
+  background: var(--border-subtle);
 }
 /* Match the sidebar's tab / close icon-button style (transparent, 26px, muted) */
 .filter-icon-btn {
