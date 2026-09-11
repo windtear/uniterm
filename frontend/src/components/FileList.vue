@@ -30,15 +30,27 @@
       <button v-if="mode === 'remote'" class="filter-icon-btn" @click="emit('upload')" :title="t('sftp.upload')">
         <el-icon><Upload :size="14" /></el-icon>
       </button>
-      <!-- Flat toolbar (toolbarLayout="flat"): the more-menu's create actions are
-           also surfaced as icon buttons. -->
+      <!-- Flat toolbar (toolbarLayout="flat"): every action lives on the bar,
+           so there is no more-menu in this layout. -->
       <button v-if="flatToolbar" class="filter-icon-btn" @click="doNewFile" :title="t('sftp.newFile')">
         <el-icon><FilePlus2 :size="14" /></el-icon>
       </button>
       <button v-if="flatToolbar" class="filter-icon-btn" @click="doMkdir" :title="t('sftp.newDirectory')">
         <el-icon><FolderPlus :size="14" /></el-icon>
       </button>
-      <button class="filter-icon-btn" @click.stop="moreMenuRef?.toggle($event.currentTarget as HTMLElement)" :title="t('sftp.more')">
+      <button v-if="flatToolbar && supportsSymlink" class="filter-icon-btn" @click="doSymlink" :title="t('sftp.newLink')">
+        <el-icon><Link :size="14" /></el-icon>
+      </button>
+      <button
+        v-if="flatToolbar"
+        class="filter-icon-btn"
+        :class="{ active: showHidden }"
+        @click="toggleShowHidden"
+        :title="showHidden ? t('sftp.hideHidden') : t('sftp.showHidden')"
+      >
+        <el-icon><Eye :size="14" /></el-icon>
+      </button>
+      <button v-if="!flatToolbar" class="filter-icon-btn" @click.stop="moreMenuRef?.toggle($event.currentTarget as HTMLElement)" :title="t('sftp.more')">
         <el-icon><MoreHorizontal :size="14" /></el-icon>
       </button>
     </div>
@@ -193,7 +205,9 @@
         </template>
     </Menu>
 
-    <Menu ref="moreMenuRef" v-model:visible="moreMenuVisible">
+    <!-- The more-menu only exists in the compact (sidebar) layout; flat keeps
+         every action on the toolbar. -->
+    <Menu v-if="!flatToolbar" ref="moreMenuRef" v-model:visible="moreMenuVisible">
       <!-- Compact (sidebar) layout: history navigation lives here instead of
            the narrow toolbar. Flat keeps it as toolbar buttons — toolbar
            actions are never duplicated into this menu. -->
