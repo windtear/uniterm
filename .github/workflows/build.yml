@@ -151,6 +151,14 @@ jobs:
           done
           ls -la bin/uniTerm-amd64.app/Contents/MacOS bin/uniTerm-arm64.app/Contents/MacOS
 
+          # Self-update payloads: bare app-bundle binary per arch, matching
+          # what the in-app updater downloads, verifies and ad-hoc re-signs.
+          for arch in amd64 arm64; do
+            tar czf "uniterm-darwin-${arch}-${VERSION}-update.tar.gz" \
+              -C "bin/uniTerm-${arch}.app/Contents/MacOS" uniTerm
+          done
+          ls -la uniterm-darwin-*-update.tar.gz
+
       - name: Package (macOS)
         if: matrix.slug == 'darwin'
         run: |
@@ -311,6 +319,10 @@ jobs:
         run: |
           find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' \) -exec mv {} . \;
           ls -la uniterm-*
+          # checksums.txt powers the in-app updater's SHA256 verification.
+          # sync-gitee.yml mirrors it to Gitee together with the assets.
+          sha256sum uniterm-* > checksums.txt
+          cat checksums.txt
 
       - name: Determine release mode
         run: |
@@ -371,5 +383,6 @@ jobs:
             uniterm-*.dmg
             uniterm-*.deb
             uniterm-*.rpm
+            checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

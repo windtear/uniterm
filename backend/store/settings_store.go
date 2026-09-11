@@ -12,8 +12,9 @@ import (
 
 const settingsFileName = "settings.json"
 
-func boolPtr(b bool) *bool { return &b }
-func intPtr(i int) *int    { return &i }
+func boolPtr(b bool) *bool    { return &b }
+func intPtr(i int) *int       { return &i }
+func strPtr(s string) *string { return &s }
 
 type TerminalSettings struct {
 	Theme             string `json:"theme"`
@@ -148,9 +149,14 @@ type AppSettings struct {
 	AI              AISettings            `json:"ai"`
 	Keyboard        map[string]KeyBinding `json:"keyboard"`
 	AutoCheckUpdate *bool                 `json:"autoCheckUpdate"`
-	CloseTabPrompt  *bool                 `json:"closeTabPrompt"`
-	CloseAppPrompt  *bool                 `json:"closeAppPrompt"`
-	SFTPBookmarks   SFTPBookmarks         `json:"sftpBookmarks"`
+	// UpdateSource selects where update checks and downloads come from:
+	// "auto" (default, picks by UI language with fallback), "github" or
+	// "gitee" (domestic mirror). Pointer + omitempty so settings.json written
+	// by older builds still load; nil means "auto".
+	UpdateSource   *string       `json:"updateSource,omitempty"`
+	CloseTabPrompt *bool         `json:"closeTabPrompt"`
+	CloseAppPrompt *bool         `json:"closeAppPrompt"`
+	SFTPBookmarks  SFTPBookmarks `json:"sftpBookmarks"`
 	// SftpTransferPanelVisible remembers whether the SFTP transfer panel was
 	// last left visible. Pointer + omitempty so settings.json written by older
 	// builds (which lack this field) still load; nil means "use the frontend
@@ -278,6 +284,11 @@ func (s *SettingsStore) Load() (AppSettings, error) {
 		settings.AutoCheckUpdate = boolPtr(true)
 		needsSave = true
 	}
+	// Default updateSource to "auto" if not present
+	if settings.UpdateSource == nil {
+		settings.UpdateSource = strPtr("auto")
+		needsSave = true
+	}
 	if settings.CloseTabPrompt == nil {
 		settings.CloseTabPrompt = boolPtr(true)
 		needsSave = true
@@ -322,6 +333,7 @@ func defaultSettings() AppSettings {
 		},
 		Keyboard:        defaultKeyboard(),
 		AutoCheckUpdate: boolPtr(true),
+		UpdateSource:    strPtr("auto"),
 		CloseTabPrompt:  boolPtr(true),
 		CloseAppPrompt:  boolPtr(true),
 		SFTPBookmarks: SFTPBookmarks{

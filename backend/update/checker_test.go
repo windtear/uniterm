@@ -1,0 +1,154 @@
+package update
+
+import (
+	"testing"
+)
+
+func TestVersionGreater(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v1.9.2", "v1.9.1", true},
+		{"1.10.0", "1.9.9", true},
+		{"v1.9.2", "v1.9.2", false},
+		{"1.9.1", "1.9.2", false},
+		{"2.0.0", "1.9.9", true},
+		{"1.9.0-rc1", "1.8.0", true},
+		{"1.9.0-rc1", "1.9.0-rc2", false},
+		{"1.9.0-rc2", "1.9.0-rc1", true},
+		{"1.9.0", "1.9.0-rc2", true}, // release outranks prerelease
+		{"1.9.0-rc1", "1.9.0", false},
+		{"1.9.0+build5", "1.9.0", false}, // build metadata ignored
+	}
+	for _, c := range cases {
+		if got := versionGreater(c.latest, c.current); got != c.want {
+			t.Errorf("versionGreater(%q, %q) = %v, want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
+
+func TestShouldUpdate(t *testing.T) {
+	if !shouldUpdate("dev", "v1.9.2") {
+		t.Error("dev builds should always report an update")
+	}
+	if shouldUpdate("v1.9.2", "dev") {
+		t.Error("non-dev build newer than dev should not report an update")
+	}
+	if shouldUpdate("v1.9.2", "v1.9.2") {
+		t.Error("same version should not report an update")
+	}
+}
+
+func TestParseChecksums(t *testing.T) {
+	data := []byte("" +
+		"aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899  uniterm-linux-amd64-v1.9.2.tar.gz\n" +
+		"ffeeddccbbaa00112233445566778899ffeeddccbbaa00112233445566778899 *uniterm-windows-amd64-portable-v1.9.2.zip\n" +
+		"not-a-hash file.txt\n")
+	sums := parseChecksums(data)
+	if got := sums["uniterm-linux-amd64-v1.9.2.tar.gz"]; got != "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899" {
+		t.Errorf("unexpected checksum: %q", got)
+	}
+	if got := sums["uniterm-windows-amd64-portable-v1.9.2.zip"]; got != "ffeeddccbbaa00112233445566778899ffeeddccbbaa00112233445566778899" {
+		t.Errorf("star-prefixed name not parsed: %q", got)
+	}
+	if _, ok := sums["file.txt"]; ok {
+		t.Error("invalid hash line should be skipped")
+	}
+}
+
+func TestClassifyAsset(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"uniterm-windows-amd64-installer-v1.9.2.exe", "installer"},
+		{"uniterm-windows-arm64-portable-v1.9.2.zip", "portable"},
+		{"uniterm-linux-amd64-v1.9.2.tar.gz", "binary-tar.gz"},
+		{"uniterm-darwin-arm64-v1.9.2-update.tar.gz", "binary-tar.gz"},
+		{"uniterm-darwin-arm64-v1.9.2.dmg", "other"},
+		{"uniterm-linux-amd64-v1.9.2.deb", "other"},
+	}
+	for _, c := range cases {
+		if got := classifyAsset(c.name); got != c.want {
+			t.Errorf("classifyAsset(%q) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestAssetMatchesPlatform(t *testing.T) {
+	cases := []struct {
+		os, arch, name string
+		want           bool
+	}{
+		{"darwin", "arm64", "uniterm-darwin-arm64-v1.9.2-update.tar.gz", true},
+		{"darwin", "arm64", "uniterm-darwin-amd64-v1.9.2-update.tar.gz", false},
+		{"linux", "amd64", "uniterm-linux-amd64-v1.9.2.tar.gz", true},
+		{"linux", "arm64", "uniterm-linux-amd64-v1.9.2.tar.gz", false},
+		{"windows", "amd64", "uniterm-windows-amd64-portable-v1.9.2.zip", true},
+		{"windows", "arm64", "uniterm-windows-amd64-portable-v1.9.2.zip", false},
+		{"freebsd", "amd64", "uniterm-linux-amd64-v1.9.2.tar.gz", false},
+	}
+	for _, c := range cases {
+		if got := assetMatchesPlatform(c.os, c.arch, c.name); got != c.want {
+			t.Errorf("assetMatchesPlatform(%q, %q, %q) = %v, want %v", c.os, c.arch, c.name, got, c.want)
+		}
+	}
+}
+
+func TestCandidatesForOrdering(t *testing.T) {
+	rels := map[string]*release{
+		"github": {Assets: []releaseAsset{
+			{Name: "uniterm-windows-amd64-portable-v1.9.2.zip", BrowserDownloadURL: "https://github.com/portable.zip"},
+			{Name: "uniterm-windows-amd64-installer-v1.9.2.exe", BrowserDownloadURL: "https://github.com/installer.exe"},
+			{Name: "uniterm-darwin-amd64-v1.9.2.dmg", BrowserDownloadURL: "https://github.com/x.dmg"},
+		}},
+		"gitee": {Assets: []releaseAsset{
+			{Name: "uniterm-windows-amd64-portable-v1.9.2.zip", BrowserDownloadURL: "https://gitee.com/portable.zip"},
+			{Name: "uniterm-windows-amd64-installer-v1.9.2.exe", BrowserDownloadURL: "https://gitee.com/installer.exe"},
+		}},
+	}
+	sums := map[string]string{"uniterm-windows-amd64-installer-v1.9.2.exe": "hash1"}
+
+	// Installer channel: installer kind first, primary source (github) first.
+	got := candidatesFor("windows", "amd64", ChannelInstaller, "github", rels, sums)
+	if len(got) != 4 {
+		t.Fatalf("want 4 candidates, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "uniterm-windows-amd64-installer-v1.9.2.exe" || got[0].Source != "github" {
+		t.Errorf("first candidate should be github installer, got %+v", got[0])
+	}
+	if got[0].SHA256 != "hash1" {
+		t.Errorf("sha256 not attached: %+v", got[0])
+	}
+	if got[1].Source != "gitee" || got[1].Kind() != "installer" {
+		t.Errorf("second candidate should be gitee installer, got %+v", got[1])
+	}
+	// Portable channel: no installer candidates at all.
+	got = candidatesFor("windows", "amd64", ChannelPortable, "github", rels, sums)
+	if len(got) != 2 {
+		t.Fatalf("want 2 portable candidates, got %d: %+v", len(got), got)
+	}
+	if got[0].Kind() != "portable" || got[1].Kind() != "portable" {
+		t.Errorf("portable channel must only return portable assets: %+v", got)
+	}
+	// Gitee primary flips the ordering.
+	got = candidatesFor("windows", "amd64", ChannelPortable, "gitee", rels, sums)
+	if got[0].Source != "gitee" || got[1].Source != "github" {
+		t.Errorf("gitee primary should come first, got %+v", got)
+	}
+	// Package channel: nothing is downloadable in-app.
+	if got := candidatesFor("linux", "amd64", ChannelPackage, "github", rels, sums); len(got) != 0 {
+		t.Errorf("package channel should return no candidates, got %+v", got)
+	}
+	// darwin: only the -update.tar.gz asset (dmg is "other").
+	rels["github"].Assets = append(rels["github"].Assets,
+		releaseAsset{Name: "uniterm-darwin-amd64-v1.9.2-update.tar.gz", BrowserDownloadURL: "https://github.com/update.tar.gz"})
+	got = candidatesFor("darwin", "amd64", ChannelPortable, "github", rels, sums)
+	if len(got) != 1 || got[0].Name != "uniterm-darwin-amd64-v1.9.2-update.tar.gz" {
+		t.Errorf("darwin portable should match only the -update.tar.gz asset, got %+v", got)
+	}
+}
+
+// Kind mirrors classifyAsset for test assertions.
+func (a UpdateAsset) Kind() string { return classifyAsset(a.Name) }
