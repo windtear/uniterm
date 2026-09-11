@@ -8,21 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"strconv"
-	"os"
-	"os/exec"
-	"path/filepath"
-	goruntime "runtime"
-	"strings"
-	stdsync "sync"
-	"sync/atomic"
-	"time"
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"golang.org/x/crypto/ssh"
 	"github.com/ys-ll/uniterm/backend/container"
 	"github.com/ys-ll/uniterm/backend/credentials"
 	"github.com/ys-ll/uniterm/backend/importer"
@@ -34,6 +20,20 @@ import (
 	"github.com/ys-ll/uniterm/backend/sync"
 	"github.com/ys-ll/uniterm/backend/update"
 	"github.com/ys-ll/uniterm/backend/utils"
+	"golang.org/x/crypto/ssh"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	goruntime "runtime"
+	"strconv"
+	"strings"
+	stdsync "sync"
+	"sync/atomic"
+	"time"
 )
 
 type App struct {
@@ -1399,7 +1399,6 @@ func (a *App) LoadQuickCommands() (store.QuickCommandData, error) {
 	return a.quickCommandsStore.Load()
 }
 
-
 // CommandsStore methods
 
 func (a *App) ListCommands() ([]store.CommandMeta, error) {
@@ -1614,6 +1613,55 @@ func (a *App) RelaunchApp() {
 
 func (a *App) CheckForUpdate(source string) (*update.UpdateInfo, error) {
 	return update.Check(Version, source)
+}
+
+// updateManager holds the in-progress update state (download → apply).
+var updateManager = update.NewManager()
+
+// UpdateChannelInfo tells the frontend how this install updates itself.
+type UpdateChannelInfo struct {
+	Channel string `json:"channel"` // "portable" | "installer" | "package"
+}
+
+// GetUpdateChannel reports how the running install should be updated.
+// "package" means a package manager owns updates and self-update is disabled.
+func (a *App) GetUpdateChannel() UpdateChannelInfo {
+	return UpdateChannelInfo{Channel: string(update.DetectChannel())}
+}
+
+// emitUpdateProgress forwards update progress payloads to the frontend.
+func (a *App) emitUpdateProgress(p update.Progress) {
+	a.app.Event.Emit("update:progress", p)
+}
+
+// DownloadUpdate downloads and verifies the best available update asset from
+// the ordered candidate list (primary source first, mirror as fallback).
+// Progress is streamed to the frontend via the update:progress event.
+func (a *App) DownloadUpdate(assets []update.UpdateAsset) error {
+	if devBuild {
+		return fmt.Errorf("updates are disabled in development builds")
+	}
+	if len(assets) == 0 {
+		return fmt.Errorf("no update assets available")
+	}
+	_, err := updateManager.Download(assets, a.emitUpdateProgress)
+	return err
+}
+
+// ApplyUpdate installs the staged update and restarts the app. For Windows
+// installer-channel installs it spawns a detached updater that runs the new
+// NSIS installer after this process exits (the installer relaunches the app),
+// so it just quits instead of relaunching.
+func (a *App) ApplyUpdate() error {
+	if err := updateManager.Apply(a.emitUpdateProgress); err != nil {
+		return err
+	}
+	if update.DetectChannel() == update.ChannelInstaller {
+		a.app.Quit()
+		return nil
+	}
+	a.RelaunchApp()
+	return nil
 }
 
 // FrontendLog writes a frontend log message to the application log file.

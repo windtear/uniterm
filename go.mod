@@ -16,6 +16,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/mattn/go-ieproxy v0.0.12
 	github.com/microsoft/go-mssqldb v1.10.0
+	github.com/minio/selfupdate v0.6.0
 	github.com/pkg/sftp v1.13.10
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/rhnvrm/simples3 v0.11.1
@@ -36,6 +37,7 @@ require (
 )
 
 require (
+	aead.dev/minisign v0.2.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

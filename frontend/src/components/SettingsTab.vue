@@ -857,6 +857,19 @@
               {{ t('settings.autoCheckUpdate') }}
             </el-checkbox>
           </div>
+          <div class="about-update-source">
+            <span class="about-update-source-label">{{ t('settings.updateSource') }}</span>
+            <el-select
+              v-model="updateCheck.source"
+              size="small"
+              class="about-update-source-select"
+              @change="(v: 'auto' | 'github' | 'gitee') => updateCheck.setSource(v)"
+            >
+              <el-option :label="t('settings.updateSourceAuto')" value="auto" />
+              <el-option :label="t('settings.updateSourceGithub')" value="github" />
+              <el-option :label="t('settings.updateSourceGitee')" value="gitee" />
+            </el-select>
+          </div>
         </div>
       </div>
 
@@ -2320,6 +2333,17 @@ async function onToggleSystemTitleBar(v: boolean) {
   margin-top: 12px;
   font-size: 13px;
   font-family: var(--font-ui);
+}
+.about-update-source {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+}
+.about-update-source-select {
+  width: 190px;
 }
 
 .kb-key {
