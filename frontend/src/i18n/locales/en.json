@@ -1114,6 +1114,7 @@
   "shortcut.navigateNext": "Next Panel",
   "shortcut.closePanel": "Close Panel/Tab",
   "shortcut.toggleSidebar": "Toggle Connection Sidebar",
+  "shortcut.openQuickCommands": "Open Quick Commands",
   "shortcut.focusTerminal": "Focus Terminal",
   "shortcut.focusAI": "Toggle AI Sidebar",
   "shortcut.lockAI": "Lock/Unlock AI Window",

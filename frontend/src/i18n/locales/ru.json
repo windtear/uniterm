@@ -1109,6 +1109,7 @@
   "shortcut.navigateNext": "Следующая панель",
   "shortcut.closePanel": "Закрыть панель/вкладку",
   "shortcut.toggleSidebar": "Переключить боковую панель",
+  "shortcut.openQuickCommands": "Открыть быстрые команды",
   "shortcut.focusTerminal": "Фокус на терминал",
   "shortcut.focusAI": "Переключить ИИ-панель",
   "shortcut.lockAI": "Заблокировать/разблокировать ИИ-окно",

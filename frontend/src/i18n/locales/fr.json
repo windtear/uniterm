@@ -1106,6 +1106,7 @@
   "shortcut.navigateNext": "Panneau suivant",
   "shortcut.closePanel": "Fermer le panneau/l'onglet",
   "shortcut.toggleSidebar": "Afficher/masquer la barre latérale",
+  "shortcut.openQuickCommands": "Ouvrir les commandes rapides",
   "shortcut.focusTerminal": "Focus sur le terminal",
   "shortcut.focusAI": "Afficher/masquer la barre IA",
   "shortcut.lockAI": "Verrouiller/déverrouiller la fenêtre IA",

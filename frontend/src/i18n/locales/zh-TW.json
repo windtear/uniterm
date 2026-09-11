@@ -1114,6 +1114,7 @@
   "shortcut.navigateNext": "後一個面板",
   "shortcut.closePanel": "關閉面板/標籤",
   "shortcut.toggleSidebar": "開/關連線邊欄並搜尋",
+  "shortcut.openQuickCommands": "開啟快速命令並搜尋",
   "shortcut.focusTerminal": "焦點回終端",
   "shortcut.focusAI": "開/關AI邊欄並對話",
   "shortcut.lockAI": "鎖定/解鎖AI視窗",

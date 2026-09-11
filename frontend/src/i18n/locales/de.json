@@ -1109,6 +1109,7 @@
   "shortcut.navigateNext": "Nächstes Panel",
   "shortcut.closePanel": "Panel/Tab schließen",
   "shortcut.toggleSidebar": "Verbindungsseitenleiste umschalten",
+  "shortcut.openQuickCommands": "Schnellbefehle öffnen",
   "shortcut.focusTerminal": "Terminal fokussieren",
   "shortcut.focusAI": "KI-Seitenleiste umschalten",
   "shortcut.lockAI": "KI-Fenster sperren/entsperren",

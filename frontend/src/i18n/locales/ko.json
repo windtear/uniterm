@@ -1109,6 +1109,7 @@
   "shortcut.navigateNext": "다음 패널",
   "shortcut.closePanel": "패널/탭 닫기",
   "shortcut.toggleSidebar": "연결 사이드바 전환",
+  "shortcut.openQuickCommands": "빠른 명령 열기",
   "shortcut.focusTerminal": "터미널 포커스",
   "shortcut.focusAI": "AI 사이드바 전환",
   "shortcut.lockAI": "AI 창 잠금/잠금 해제",

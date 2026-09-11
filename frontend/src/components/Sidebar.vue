@@ -11,7 +11,7 @@
       <button v-if="tabVisible('files')" class="sidebar-tab" :class="{ active: activeView === 'files' }" @click="onFilesTabClick" :title="t('header.files')"><el-icon><FolderTree :size="14" /></el-icon></button>
       <button v-if="tabVisible('monitor')" class="sidebar-tab" :class="{ active: activeView === 'monitor' }" @click="onMonitorTabClick" :title="t('header.monitor')"><el-icon><Activity :size="14" /></el-icon></button>
       <button v-if="tabVisible('tunnels')" class="sidebar-tab" :class="{ active: activeView === 'tunnels' }" @click="activeView = 'tunnels'" :title="t('tunnels.tunnelsTab')"><el-icon><ArrowRightLeft :size="14" /></el-icon></button>
-      <button v-if="tabVisible('quickCommands')" class="sidebar-tab" :class="{ active: activeView === 'quickCommands' }" @click="activeView = 'quickCommands'" :title="t('quickCommands.quickCommandsTab')"><el-icon><Zap :size="14" /></el-icon></button>
+      <button v-if="tabVisible('quickCommands')" class="sidebar-tab" :class="{ active: activeView === 'quickCommands' }" @click="activeView = 'quickCommands'" :title="quickCommandsTitle"><el-icon><Zap :size="14" /></el-icon></button>
       <button v-if="tabVisible('history')" class="sidebar-tab" :class="{ active: activeView === 'history' }" @click="activeView = 'history'" :title="t('quickCommands.historyTab')"><el-icon><Clock :size="14" /></el-icon></button>
       <button v-if="tabVisible('personalization')" class="sidebar-tab" :class="{ active: activeView === 'personalization' }" @click="activeView = 'personalization'" :title="t('sidebar.personalization')"><el-icon><Palette :size="14" /></el-icon></button>
       <button class="icon-btn" @click="emit('toggle')" :title="t('sidebar.collapse')"><el-icon><X :size="14" /></el-icon></button>
@@ -172,7 +172,7 @@
     </div>
     </template>
 
-    <QuickCommandsPanel v-if="activeView === 'quickCommands'" />
+    <QuickCommandsPanel v-if="activeView === 'quickCommands'" ref="quickCommandsRef" />
 
     <TunnelsPanel v-if="activeView === 'tunnels'" />
 
@@ -498,6 +498,7 @@ import { formatFontFamily, normalizeFontFamilyValue } from '../utils/formatFontF
 import { useTerminalThemeOptions } from '../composables/useTerminalThemeOptions'
 import { GetAllFonts } from '../../bindings/github.com/ys-ll/uniterm/app'
 import { useLocalStateStore } from '../stores/localStateStore'
+import { formatKeyBinding } from '../composables/useKeyboardShortcuts'
 
 defineProps<{
   visible: boolean
@@ -509,6 +510,12 @@ const panelStore = usePanelStore()
 const tabStore = useTabStore()
 const companionStore = useCompanionStore()
 const { t } = useI18n()
+const isMacPlatform = /Mac|iPhone|iPad/.test(navigator.userAgent)
+const quickCommandsTitle = computed(() => {
+  const binding = settingsStore.settings.keyboard.openQuickCommands
+  const shortcut = binding ? formatKeyBinding(binding, isMacPlatform) : ''
+  return shortcut ? `${t('quickCommands.quickCommandsTab')} (${shortcut})` : t('quickCommands.quickCommandsTab')
+})
 
 // Connection ids that currently have an open panel/session (panel.config.id).
 // Reactive over the panelStore map, so it updates as panels open/close.
@@ -524,6 +531,12 @@ const showExportDialog = ref(false)
 const showImportDialog = ref(false)
 const editConfig = ref<ConnectionConfig | undefined>(undefined)
 const activeView = ref<'connections' | 'quickCommands' | 'history' | 'personalization' | 'files' | 'monitor' | 'tunnels'>('connections')
+const quickCommandsRef = ref<InstanceType<typeof QuickCommandsPanel> | null>(null)
+
+function openQuickCommands() {
+  activeView.value = 'quickCommands'
+  nextTick(() => quickCommandsRef.value?.focusSearch())
+}
 
 // ── SSH companion: files / monitor folded into this sidebar ──
 function onFilesTabClick() {
@@ -1999,7 +2012,7 @@ function openChangeGroupForGroup(groupId: string) {
   showChangeGroupDialog.value = true
 }
 
-defineExpose({ focusSearch, openChangeGroupFor, openChangeGroupForGroup })
+defineExpose({ focusSearch, openQuickCommands, openChangeGroupFor, openChangeGroupForGroup })
 </script>
 
 <style scoped>

@@ -952,6 +952,10 @@ const actionHandlers: Record<ShortcutAction, () => void> = {
       nextTick(() => sidebarRef.value?.focusSearch())
     }
   },
+  openQuickCommands: () => {
+    sidebarVisible.value = true
+    nextTick(() => sidebarRef.value?.openQuickCommands())
+  },
   focusTerminal: () => {
     const pid = tabStore.getActivePanelId()
     if (pid) focusPanelTerminal(pid)

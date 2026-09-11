@@ -1109,6 +1109,7 @@
   "shortcut.navigateNext": "次のパネル",
   "shortcut.closePanel": "パネル/タブを閉じる",
   "shortcut.toggleSidebar": "接続サイドバーの切り替え",
+  "shortcut.openQuickCommands": "クイックコマンドを開く",
   "shortcut.focusTerminal": "ターミナルにフォーカス",
   "shortcut.focusAI": "AIサイドバーの切り替え",
   "shortcut.lockAI": "AIウィンドウのロック/解除",

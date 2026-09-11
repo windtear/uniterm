@@ -3,6 +3,7 @@
     <!-- Toolbar: search + actions -->
     <div class="qc-toolbar">
       <el-input
+        ref="searchInputRef"
         v-model="searchQuery"
         :placeholder="t('quickCommands.searchPlaceholder')"
         clearable
@@ -253,7 +254,18 @@ const focusedId = ref<string | null>(null)
 const listRef = ref<HTMLDivElement | null>(null)
 const hoveredId = ref<string | null>(null)
 const searchQuery = ref('')
+const searchInputRef = ref<any>(null)
 const expandedGroups = ref<Set<string>>(new Set())
+
+function focusSearch() {
+  const input = searchInputRef.value?.$el?.querySelector('input')
+  if (input instanceof HTMLInputElement) {
+    input.focus()
+    input.select()
+  }
+}
+
+defineExpose({ focusSearch })
 
 const dragOverGroupId = ref<string | null>(null)
 
