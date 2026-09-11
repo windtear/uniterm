@@ -3,7 +3,6 @@ package session
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -1357,56 +1356,3 @@ func (s *SCPSession) ResumeTransfer(taskID string) error {
 	return nil
 }
 
-// --- Transfer event emitters (same wire format as the other backends) ---
-
-func (s *SCPSession) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *SCPSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}

@@ -5,7 +5,6 @@ package session
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -746,43 +745,3 @@ func (s *WSLFileSession) Disconnect() error {
 	return nil
 }
 
-// --- transfer event emission (OSC 633 window-reporting, like SFTP) -----------
-
-func (s *WSLFileSession) emitTransferStart(task *TransferTask) {
-	name := path.Base(task.RemotePath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type": "sftp:transfer", "taskId": task.ID, "event": "start",
-		"tfType": task.Type, "name": name, "total": task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WSLFileSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type": "sftp:transfer", "taskId": task.ID, "event": "progress",
-		"progress": task.Progress, "total": task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WSLFileSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type": "sftp:transfer", "taskId": task.ID, "event": "complete", "status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WSLFileSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type": "sftp:transfer", "taskId": task.ID, "event": "complete",
-		"status": "error", "error": err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}

@@ -115,7 +115,7 @@ type App struct {
 }
 
 func NewApp(webviewDataPath string) *App {
-	return &App{
+	a := &App{
 		webviewDataPath:    webviewDataPath,
 		panelLogs:          make(map[string]*session.OutputLogger),
 		sessionToPanel:     make(map[string]string),
@@ -124,6 +124,14 @@ func NewApp(webviewDataPath string) *App {
 		containerManager:   container.NewManager(),
 		errCh:              make(chan error, 16),
 	}
+
+	// Transfer progress is published as Wails events, not OSC sequences in the
+	// terminal data stream.
+	session.TransferEventSink = func(sid string, payload map[string]any) {
+		a.emit("sftp:transfer", payload)
+	}
+
+	return a
 }
 
 // emit is a v3 helper that forwards an event to the frontend. It no-ops when

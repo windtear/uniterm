@@ -1,7 +1,6 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -585,56 +584,3 @@ func (s *WebDAVSession) uploadFile(task *TransferTask, localPath, remotePath str
 	return <-errCh
 }
 
-// --- Transfer event emitters ---
-
-func (s *WebDAVSession) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WebDAVSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WebDAVSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *WebDAVSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}

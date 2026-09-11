@@ -2,7 +2,6 @@ package session
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -848,56 +847,3 @@ func (s *FTPSession) transferFile(task *TransferTask, localPath, remotePath, tfT
 	return nil
 }
 
-// --- Transfer event emitters ---
-
-func (s *FTPSession) emitTransferStart(task *TransferTask) {
-	name := filepath.Base(task.LocalPath)
-	if task.Type == "download" {
-		name = path.Base(task.RemotePath)
-	}
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "start",
-		"tfType": task.Type,
-		"name":   name,
-		"total":  task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *FTPSession) emitTransferProgress(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":     "sftp:transfer",
-		"taskId":   task.ID,
-		"event":    "progress",
-		"progress": task.Progress,
-		"total":    task.Total,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *FTPSession) emitTransferComplete(task *TransferTask) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": task.Status,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
-
-func (s *FTPSession) emitTransferEvent(task *TransferTask, err error) {
-	payload := map[string]interface{}{
-		"type":   "sftp:transfer",
-		"taskId": task.ID,
-		"event":  "complete",
-		"status": "error",
-		"error":  err.Error(),
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	s.emitData([]byte("\x1b]633;S" + string(jsonBytes) + "\x07"))
-}
