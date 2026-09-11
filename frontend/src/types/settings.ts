@@ -162,7 +162,13 @@ export interface KeyBinding {
   key: string
 }
 
-export type KeyboardSettings = Partial<Record<ShortcutAction, KeyBinding>>
+// tabSwitchModifier is not a per-action binding: only its modifier flags
+// (ctrl/meta/shift/alt) are read, its `key` stays empty. The configured combo
+// held together with a digit key switches to that tab (1-9, 0 = tenth tab).
+// A binding with no modifier set disables the feature.
+export type KeyboardSettings = Partial<Record<ShortcutAction, KeyBinding>> & {
+  tabSwitchModifier?: KeyBinding
+}
 
 export const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   newConnection: 'shortcut.newConnection',
@@ -206,6 +212,10 @@ export const DEFAULT_KEYBOARD: KeyboardSettings = {
   toggleTimestamps: { ctrl: true, shift: true, alt: false, key: 't' },
   zoomFontIn: { ctrl: true, shift: false, alt: false, key: '=' },
   zoomFontOut: { ctrl: true, shift: false, alt: false, key: '-' },
+  // Modifier held with a digit key to jump to that tab (Alt+1 … Alt+9, Alt+0
+  // = tenth tab). `key` stays empty; only the flags are matched. An entry
+  // with no modifier set disables the feature.
+  tabSwitchModifier: { ctrl: false, meta: false, shift: false, alt: true, key: '' },
 }
 
 export interface SFTPBookmarks {

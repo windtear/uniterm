@@ -872,6 +872,44 @@
             </tr>
           </thead>
           <tbody>
+            <tr>
+              <td>
+                {{ t('shortcut.switchToTabByIndex') }}
+                <div class="kb-hint">{{ t('shortcut.switchToTabByIndexHint') }}</div>
+              </td>
+              <td><kbd class="kb-key">{{ tabSwitchBindingDisplay() }}</kbd></td>
+              <td class="kb-actions">
+                <el-button
+                  :type="rebindingTabSwitch ? 'warning' : 'default'"
+                  @click="startRebindTabSwitch()"
+                >
+                  {{ rebindingTabSwitch ? t('shortcut.pressModifier') : t('shortcut.edit') }}
+                </el-button>
+                <el-button
+                  v-if="rebindingTabSwitch"
+
+                  @click="stopRebind()"
+                >
+                  {{ t('shortcut.cancel') }}
+                </el-button>
+                <el-button
+                  v-if="rebindingTabSwitch"
+
+                  type="danger"
+                  @click="clearTabSwitchModifier()"
+                >
+                  {{ t('shortcut.clear') }}
+                </el-button>
+                <el-button
+                  v-if="!isDefaultTabSwitchModifier() && !rebindingTabSwitch"
+
+                  type="danger"
+                  @click="resetTabSwitchModifier()"
+                >
+                  {{ t('shortcut.reset') }}
+                </el-button>
+              </td>
+            </tr>
             <tr
               v-for="action in (Object.keys(SHORTCUT_LABELS) as ShortcutAction[])"
               :key="action"
@@ -1448,6 +1486,10 @@ watch(() => settingsStore.openCategory, (cat) => {
 // ── Keyboard rebinding ──
 const rebindingAction = ref<ShortcutAction | null>(null)
 
+// Capture mode for the modifier+digit tab-switch row: unlike per-action
+// bindings, only the modifier flags are stored and `key` stays empty.
+const rebindingTabSwitch = ref(false)
+
 function bindingDisplay(action: ShortcutAction): string {
   const b = settingsStore.settings.keyboard[action]
   if (!b) return ''
@@ -1490,6 +1532,7 @@ function stopRebind() {
     window.removeEventListener('blur', onRebindBlur)
   }
   rebindingAction.value = null
+  rebindingTabSwitch.value = false
   installGlobalListener()
 }
 
@@ -1503,6 +1546,7 @@ function clearBinding(action: ShortcutAction) {
 }
 
 function onRebindKeydown(e: KeyboardEvent) {
+  if (rebindingTabSwitch.value) return onRebindTabSwitchKeydown(e)
   if (!rebindingAction.value) return stopRebind()
   e.preventDefault()
   e.stopPropagation()
@@ -1543,6 +1587,73 @@ function findConflict(binding: KeyBinding): ShortcutAction | null {
 
 function bindingKey(binding: KeyBinding): string {
   return `${binding.ctrl ? 'ctrl+' : ''}${binding.meta ? 'meta+' : ''}${binding.shift ? 'shift+' : ''}${binding.alt ? 'alt+' : ''}${binding.key.toLowerCase()}`
+}
+
+// ── Modifier+digit tab switching (tabSwitchModifier) ──
+
+function tabSwitchBindingDisplay(): string {
+  const b = settingsStore.settings.keyboard.tabSwitchModifier
+  if (!b || (!b.ctrl && !b.meta && !b.shift && !b.alt)) return ''
+  // formatKeyBinding pushes the (empty) key too, leaving a trailing '+'
+  const mods = formatKeyBinding({ ctrl: !!b.ctrl, meta: b.meta, shift: !!b.shift, alt: !!b.alt, key: '' }, isMac.value).replace(/\++$/, '')
+  return `${mods} + ${t('shortcut.digitKeys')}`
+}
+
+function isDefaultTabSwitchModifier(): boolean {
+  const cur = settingsStore.settings.keyboard.tabSwitchModifier
+  const def = DEFAULT_KEYBOARD.tabSwitchModifier
+  if (!cur || !def) return true
+  return !!cur.ctrl === !!def.ctrl && !!cur.meta === !!def.meta
+    && !!cur.shift === !!def.shift && !!cur.alt === !!def.alt
+}
+
+function setTabSwitchModifier(binding: KeyBinding) {
+  const kb: KeyboardSettings = { ...settingsStore.settings.keyboard, tabSwitchModifier: binding }
+  // Mirror the per-action conflict rule: an action explicitly bound to the
+  // same combo with a digit key would shadow the family for that digit, so
+  // clear it like findConflict does for regular rebinds.
+  for (const [action, b] of Object.entries(kb) as [ShortcutAction, KeyBinding][]) {
+    if (action === ('tabSwitchModifier' as ShortcutAction)) continue
+    if (!b.key || !/^[0-9]$/.test(b.key)) continue
+    if (!!b.ctrl === !!binding.ctrl && !!b.meta === !!binding.meta
+      && !!b.shift === !!binding.shift && !!b.alt === !!binding.alt) {
+      kb[action] = { ctrl: false, meta: false, shift: false, alt: false, key: '' }
+    }
+  }
+  settingsStore.settings.keyboard = kb
+  settingsStore.save()
+}
+
+function resetTabSwitchModifier() {
+  setTabSwitchModifier({ ...DEFAULT_KEYBOARD.tabSwitchModifier! })
+}
+
+function clearTabSwitchModifier() {
+  setTabSwitchModifier({ ctrl: false, meta: false, shift: false, alt: false, key: '' })
+  stopRebind()
+}
+
+function startRebindTabSwitch() {
+  rebindingTabSwitch.value = true
+  uninstallGlobalListener()
+  if (!rebindListenerActive) {
+    rebindListenerActive = true
+    document.addEventListener('keydown', onRebindKeydown, true)
+    window.addEventListener('blur', onRebindBlur)
+  }
+}
+
+// Modifier-only capture: bare modifier presses are ignored so the user can
+// build the combo (e.g. Ctrl+Alt); the next non-modifier key press confirms
+// the held modifiers — its own key is discarded.
+function onRebindTabSwitchKeydown(e: KeyboardEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.key === 'Escape') return stopRebind()
+  if (e.key === 'Control' || e.key === 'Shift' || e.key === 'Alt' || e.key === 'Meta') return
+  if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) return
+  setTabSwitchModifier({ ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey, key: '' })
+  stopRebind()
 }
 
 function onRebindBlur() {
@@ -2354,6 +2465,12 @@ async function onToggleSystemTitleBar(v: boolean) {
 
 .kb-table tbody tr:hover {
   background: var(--bg-hover);
+}
+
+.kb-hint {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .kb-actions {
