@@ -59,6 +59,22 @@ describe('useTransferTaskEvents', () => {
     expect(tasks[0].failedFiles).toContainEqual({ path: 'b.txt', error: 'permission denied' })
   })
 
+  it('learns fileCount from file/complete events so failed dir transfers retry recursively', () => {
+    const tasks: any[] = []
+    const { bind } = useTransferTaskEvents(() => tasks, () => 'sid-1', vi.fn())
+    bind()
+    // Backend emits start before the directory walk knows the file count.
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-3', event: 'start', tfType: 'download', name: 'dir' })
+    expect(tasks[0].fileCount).toBe(0)
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-3', event: 'file-start', file: 'a.txt', name: 'a.txt', fileCount: 3 })
+    expect(tasks[0].fileCount).toBe(3)
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-3', event: 'file-failed', file: 'a.txt', error: 'boom', fileCount: 3 })
+    fireTransfer({ sessionId: 'sid-1', type: 'sftp:transfer', taskId: 'dl-3', event: 'complete', status: 'error', fileCount: 3, completedFiles: 0 })
+    // fileCount > 0 is what makes onRetryTransfer pass recursive: true.
+    expect(tasks[0].status).toBe('error')
+    expect(tasks[0].fileCount).toBe(3)
+  })
+
   it('maps paused/resumed events onto task status without finishing the task', () => {
     const tasks: any[] = []
     const onDone = vi.fn()

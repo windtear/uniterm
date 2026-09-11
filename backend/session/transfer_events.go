@@ -116,6 +116,7 @@ func (s *baseSession) emitTransferEvent(task *TransferTask, err error) {
 func (s *baseSession) emitFileStart(task *TransferTask, rel, display string) {
 	s.emitTransferPayload(map[string]any{
 		"taskId": task.ID, "event": "file-start", "file": rel, "name": display,
+		"completedFiles": task.completedCount(), "fileCount": task.fileCount(),
 	})
 }
 
@@ -129,5 +130,6 @@ func (s *baseSession) emitFileDone(task *TransferTask, rel string) {
 func (s *baseSession) emitFileFailed(task *TransferTask, rel string, err error) {
 	s.emitTransferPayload(map[string]any{
 		"taskId": task.ID, "event": "file-failed", "file": rel, "error": err.Error(),
+		"completedFiles": task.completedCount(), "fileCount": task.fileCount(),
 	})
 }

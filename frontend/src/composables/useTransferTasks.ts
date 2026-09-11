@@ -95,6 +95,7 @@ export function useTransferTaskEvents(
         if (t) {
           t.currentFile = msg.name || msg.file
           t.files.push({ path: msg.file, status: 'running' })
+          t.fileCount = msg.fileCount || t.fileCount
         }
       } else if (msg.event === 'file-done') {
         const t = tasks.find(t => t.id === msg.taskId)
@@ -112,6 +113,7 @@ export function useTransferTaskEvents(
           if (f) f.status = 'failed'
           else t.files.push({ path: msg.file, status: 'failed' })
           t.failedFiles.push({ path: msg.file, error: msg.error })
+          t.fileCount = msg.fileCount || t.fileCount
         }
       } else if (msg.event === 'paused') {
         const t = tasks.find(t => t.id === msg.taskId)
@@ -130,6 +132,10 @@ export function useTransferTaskEvents(
           const st = msg.status as string
           existing.status = st === 'done' ? 'done' : st === 'cancelled' ? 'cancelled' : st === 'paused' ? 'paused' : 'error'
           existing.percentage = existing.status === 'done' ? 100 : existing.percentage
+          if (msg.fileCount) {
+            existing.fileCount = msg.fileCount
+            existing.completedFiles = msg.completedFiles ?? existing.completedFiles
+          }
           if (msg.failedFiles) existing.failedFiles = msg.failedFiles
           onDone(existing.status, existing.type)
           // Finished tasks stay listed until the user clears them.

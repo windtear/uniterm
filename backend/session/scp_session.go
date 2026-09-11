@@ -850,13 +850,20 @@ func (s *SCPSession) fetchTree(c *scpProtoConn, remoteDir, localRoot string, tas
 				return err
 			}
 		case 'E':
+			// OpenSSH "scp -f -r" sends exactly one E per D (including the root
+			// D), so the E that closes the root directory terminates the
+			// transfer. Returning on the empty stack right after popping keeps
+			// that final E from falling through to a read that hits EOF.
 			if len(stack) == 0 {
-				return nil // tree complete
+				return nil // already at root: nothing left to close
 			}
 			cur = stack[len(stack)-1]
 			rcur = rstack[len(rstack)-1]
 			stack = stack[:len(stack)-1]
 			rstack = rstack[:len(rstack)-1]
+			if len(stack) == 0 {
+				return nil // tree complete
+			}
 			if err := c.ack(); err != nil {
 				return err
 			}

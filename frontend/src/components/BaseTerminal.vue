@@ -364,7 +364,7 @@ function initZmodemService(sessionId: string) {
         const cancelUntil = Math.max(zmodemCancellingUntil, zmodemStore.getCancelUntil(sessionId))
         const remaining = Math.max(0, cancelUntil - Date.now())
         setTimeout(() => {
-          queuedqueuedSessionWrite(sessionId, '\n')
+          queuedSessionWrite(sessionId, '\n')
         }, remaining + 100)
       }
       zmodemStore.clearTransfers(sessionId)
