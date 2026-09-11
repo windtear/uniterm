@@ -12,7 +12,7 @@
       @tab-dragstart="onTabDragStart"
     />
     <div class="main-content">
-      <Sidebar ref="sidebarRef" :visible="sidebarVisible" @toggle="sidebarVisible = !sidebarVisible" @connect="onConnect" @connect-only="onConnectOnly" @connect-serial="showSerialDialog = true" @connect-sftp="(c: any) => { const p = tabStore.activeTab; onConnectSftp(c, p?.type === 'start' ? p : undefined) }" @connect-wsl-file="(c: any) => { const p = tabStore.activeTab; onConnectWslFile(c, p?.type === 'start' ? p : undefined) }" @connect-ftp="(c: any) => { const p = tabStore.activeTab; onConnectFtp(c, p?.type === 'start' ? p : undefined) }" @connect-smb="(c: any) => { const p = tabStore.activeTab; onConnectSmb(c, p?.type === 'start' ? p : undefined) }" @connect-webdav="(c: any) => { const p = tabStore.activeTab; onConnectWebdav(c, p?.type === 'start' ? p : undefined) }" @connect-s3="(c: any) => { const p = tabStore.activeTab; onConnectS3(c, p?.type === 'start' ? p : undefined) }" @connect-rdp="(c: any) => { const p = tabStore.activeTab; onConnectRDP(c, p?.type === 'start' ? p : undefined) }" @connect-vnc="(c: any) => { const p = tabStore.activeTab; onConnectVNC(c, p?.type === 'start' ? p : undefined) }" @connect-spice="(c: any) => { const p = tabStore.activeTab; onConnectSPICE(c, p?.type === 'start' ? p : undefined) }" @connect-x11-desktop="(c: any) => { const p = tabStore.activeTab; onConnectX11Desktop(c, p?.type === 'start' ? p : undefined) }" @connect-d-b="(c: any) => { const p = tabStore.activeTab; onConnectDB(c, p?.type === 'start' ? p : undefined) }" @connect-monitor="(c: any) => { const p = tabStore.activeTab; onConnectMonitor(c, p?.type === 'start' ? p : undefined) }" @connect-k8s="(c: any) => { const p = tabStore.activeTab; onConnectK8s(c, p?.type === 'start' ? p : undefined) }" />
+      <Sidebar ref="sidebarRef" :visible="sidebarVisible" @toggle="sidebarVisible = !sidebarVisible" @connect="onConnect" @connect-to-workspace="({ config, workspaceId }: any) => onConnect(config, undefined, undefined, true, workspaceId)" @connect-only="onConnectOnly" @connect-serial="showSerialDialog = true" @connect-sftp="(c: any) => { const p = tabStore.activeTab; onConnectSftp(c, p?.type === 'start' ? p : undefined) }" @connect-wsl-file="(c: any) => { const p = tabStore.activeTab; onConnectWslFile(c, p?.type === 'start' ? p : undefined) }" @connect-ftp="(c: any) => { const p = tabStore.activeTab; onConnectFtp(c, p?.type === 'start' ? p : undefined) }" @connect-smb="(c: any) => { const p = tabStore.activeTab; onConnectSmb(c, p?.type === 'start' ? p : undefined) }" @connect-webdav="(c: any) => { const p = tabStore.activeTab; onConnectWebdav(c, p?.type === 'start' ? p : undefined) }" @connect-s3="(c: any) => { const p = tabStore.activeTab; onConnectS3(c, p?.type === 'start' ? p : undefined) }" @connect-rdp="(c: any) => { const p = tabStore.activeTab; onConnectRDP(c, p?.type === 'start' ? p : undefined) }" @connect-vnc="(c: any) => { const p = tabStore.activeTab; onConnectVNC(c, p?.type === 'start' ? p : undefined) }" @connect-spice="(c: any) => { const p = tabStore.activeTab; onConnectSPICE(c, p?.type === 'start' ? p : undefined) }" @connect-x11-desktop="(c: any) => { const p = tabStore.activeTab; onConnectX11Desktop(c, p?.type === 'start' ? p : undefined) }" @connect-d-b="(c: any) => { const p = tabStore.activeTab; onConnectDB(c, p?.type === 'start' ? p : undefined) }" @connect-monitor="(c: any) => { const p = tabStore.activeTab; onConnectMonitor(c, p?.type === 'start' ? p : undefined) }" @connect-k8s="(c: any) => { const p = tabStore.activeTab; onConnectK8s(c, p?.type === 'start' ? p : undefined) }" />
       <div class="tab-area">
         <template v-if="activeTab">
           <KeepAlive>
@@ -1341,7 +1341,7 @@ function closeStartAndReposition(prevTab: any): (newTabId: string) => void {
   }
 }
 
-async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?: boolean, persist = true) {
+async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?: boolean, persist = true, targetWorkspaceId?: string) {
   const prev = tabStore.activeTab
   const prevStart = (prev?.type === 'start' && !keepOpen) ? prev : undefined
   // Persist form changes BEFORE dispatching by type. The type-specific
@@ -1412,9 +1412,14 @@ async function onConnect(config: ConnectionConfig, keepOpen?: boolean, wasEdit?:
   panelStore.updateTitle(panel.id, displayTitle)
   panelStore.bindSession(panel.id, sessionId)
   sessionStore.initSession(sessionId)
-  const tab = prev?.type === 'start'
-    ? tabStore.replaceStartTab(prev.id, panel.title, panel.id)
-    : tabStore.createTerminalTab(panel.title, panel.id)
+  const addedToWorkspace = targetWorkspaceId
+    ? tabStore.addNewPanelToWorkspace(targetWorkspaceId, panel.id)
+    : false
+  const tab = addedToWorkspace
+    ? tabStore.tabs.find(t => t.id === targetWorkspaceId)!
+    : prev?.type === 'start'
+      ? tabStore.replaceStartTab(prev.id, panel.title, panel.id)
+      : tabStore.createTerminalTab(panel.title, panel.id)
   panelStore.movePanelToTab(panel.id, tab.id)
   if (persist) RecordRecentConnection(config.id)
 

@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "无匹配结果",
   "sidebar.searchPlaceholder": "搜索或快捷连接...",
   "sidebar.connectSSH": "连接 SSH",
+  "sidebar.connectToWorkspace": "连接到工作区",
   "sidebar.connectSftp": "连接 SFTP",
   "sidebar.connectScp": "连接 SCP",
   "sidebar.connectFtp": "连接 FTP",

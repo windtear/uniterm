@@ -310,6 +310,14 @@
     <Menu ref="menuRef" v-model:visible="menuVisible" @contextmenu.stop>
       <!-- Terminal -->
       <MenuItem v-if="selectedConn && selectedConn.type === 'ssh'" @click="doConnect">{{ t('sidebar.connectSSH') }}</MenuItem>
+      <MenuSubmenu
+        v-if="selectedConn && selectedConn.type === 'ssh' && workspaceTabs.length"
+        :label="t('sidebar.connectToWorkspace')"
+      >
+        <MenuItem v-for="workspace in workspaceTabs" :key="workspace.id" @click="doConnectToWorkspace(workspace.id)">
+          {{ workspace.name }}
+        </MenuItem>
+      </MenuSubmenu>
       <MenuItem v-if="selectedConn && selectedConn.type === 'telnet'" @click="doConnect">{{ t('sidebar.connectTelnet') }}</MenuItem>
       <MenuItem v-if="selectedConn && selectedConn.type === 'mosh'" @click="doConnect">{{ t('sidebar.connectMosh') }}</MenuItem>
       <MenuItem v-if="selectedConn && selectedConn.type === 'local'" @click="doConnect">{{ t('sidebar.connectLocal') }}</MenuItem>
@@ -503,7 +511,7 @@ import { formatKeyBinding } from '../composables/useKeyboardShortcuts'
 defineProps<{
   visible: boolean
 }>()
-const emit = defineEmits(['connect', 'connectOnly', 'connectSftp', 'connectWslFile', 'connectFtp', 'connectSmb', 'connectWebdav', 'connectS3', 'connectRdp', 'connectVnc', 'connectSpice', 'connectX11Desktop', 'connectDB', 'connectMonitor', 'connectSerial', 'connectK8s', 'toggle'])
+const emit = defineEmits(['connect', 'connectToWorkspace', 'connectOnly', 'connectSftp', 'connectWslFile', 'connectFtp', 'connectSmb', 'connectWebdav', 'connectS3', 'connectRdp', 'connectVnc', 'connectSpice', 'connectX11Desktop', 'connectDB', 'connectMonitor', 'connectSerial', 'connectK8s', 'toggle'])
 const connectionStore = useConnectionStore()
 const settingsStore = useSettingsStore()
 const panelStore = usePanelStore()
@@ -516,6 +524,7 @@ const quickCommandsTitle = computed(() => {
   const shortcut = binding ? formatKeyBinding(binding, isMacPlatform) : ''
   return shortcut ? `${t('quickCommands.quickCommandsTab')} (${shortcut})` : t('quickCommands.quickCommandsTab')
 })
+const workspaceTabs = computed(() => tabStore.tabs.filter(tab => tab.type === 'workspace'))
 
 // Connection ids that currently have an open panel/session (panel.config.id).
 // Reactive over the panelStore map, so it updates as panels open/close.
@@ -1334,6 +1343,18 @@ function doConnect() {
   // Emit sequentially — each onConnect runs async but tabs/panels are created synchronously
   for (const c of conns) {
     emit('connect', c)
+  }
+}
+
+function doConnectToWorkspace(workspaceId: string) {
+  const ids = getSelectedConnectionIds()
+  const conns = ids
+    .map(id => connectionStore.connections.find(c => c.id === id))
+    .filter((conn): conn is ConnectionConfig => conn?.type === 'ssh')
+  selectedIds.value = new Set()
+  closeMenu()
+  for (const config of conns) {
+    emit('connectToWorkspace', { config, workspaceId })
   }
 }
 

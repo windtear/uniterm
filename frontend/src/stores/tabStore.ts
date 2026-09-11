@@ -580,6 +580,31 @@ export const useTabStore = defineStore('tab', () => {
     tabState.activeTabId = workspaceTabId
   }
 
+  // Add a newly-created panel directly to an existing workspace. Unlike
+  // addPanelToWorkspaceTab, there is no temporary terminal tab to remove.
+  function addNewPanelToWorkspace(
+    workspaceTabId: string,
+    newPanelId: string,
+    targetPanelId?: string,
+  ): boolean {
+    const wsTab = tabState.tabs.find(t => t.id === workspaceTabId)
+    if (!wsTab || wsTab.type !== 'workspace') return false
+
+    const target = targetPanelId && wsTab.panelIds.includes(targetPanelId)
+      ? targetPanelId
+      : wsTab.activePanelId || wsTab.panelIds[wsTab.panelIds.length - 1]
+    if (!target) return false
+
+    wsTab.layout = {
+      root: insertPanelIntoLayout(wsTab.layout.root, target, newPanelId, 'horizontal', false),
+    }
+    wsTab.panelIds = collectPanelIds(wsTab.layout.root)
+    wsTab.activePanelId = newPanelId
+    if (wsTab.maximizedPanelId) wsTab.maximizedPanelId = newPanelId
+    tabState.activeTabId = workspaceTabId
+    return true
+  }
+
   // ── Detach: panel from workspace ──
   // Returns the detached panelId; caller is responsible for creating a terminal
   // tab with the correct name. Handles workspace cleanup (auto-convert to
@@ -798,6 +823,7 @@ export const useTabStore = defineStore('tab', () => {
     updateWorkspaceLayout,
     mergeToWorkspace,
     addPanelToWorkspaceTab,
+    addNewPanelToWorkspace,
     removePanelFromWorkspaceTab,
     movePanelInWorkspace,
     setAILockedPanel,

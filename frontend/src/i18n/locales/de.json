@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "Keine Treffer",
   "sidebar.searchPlaceholder": "Suchen oder schnell verbinden...",
   "sidebar.connectSSH": "SSH verbinden",
+  "sidebar.connectToWorkspace": "Mit Arbeitsbereich verbinden",
   "sidebar.connectSftp": "SFTP verbinden",
   "sidebar.connectScp": "SCP verbinden",
   "sidebar.connectFtp": "FTP verbinden",

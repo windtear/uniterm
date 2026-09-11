@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "Sin coincidencias",
   "sidebar.searchPlaceholder": "Buscar o conexión rápida...",
   "sidebar.connectSSH": "Conectar SSH",
+  "sidebar.connectToWorkspace": "Conectar al espacio de trabajo",
   "sidebar.connectSftp": "Conectar SFTP",
   "sidebar.connectScp": "Conectar SCP",
   "sidebar.connectFtp": "Conectar FTP",

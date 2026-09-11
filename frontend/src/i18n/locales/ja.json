@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "一致する接続がありません",
   "sidebar.searchPlaceholder": "検索またはクイック接続...",
   "sidebar.connectSSH": "SSH で接続",
+  "sidebar.connectToWorkspace": "ワークスペースに接続",
   "sidebar.connectSftp": "SFTP で接続",
   "sidebar.connectScp": "SCP で接続",
   "sidebar.connectFtp": "FTP で接続",

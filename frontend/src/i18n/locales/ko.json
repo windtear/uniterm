@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "검색 결과가 없습니다",
   "sidebar.searchPlaceholder": "검색 또는 빠른 연결...",
   "sidebar.connectSSH": "SSH 연결",
+  "sidebar.connectToWorkspace": "작업 공간에 연결",
   "sidebar.connectSftp": "SFTP 연결",
   "sidebar.connectScp": "SCP 연결",
   "sidebar.connectFtp": "FTP 연결",

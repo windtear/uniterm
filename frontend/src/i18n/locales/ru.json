@@ -16,6 +16,7 @@
   "sidebar.noSearchResults": "Нет совпадений",
   "sidebar.searchPlaceholder": "Поиск или быстрое подключение...",
   "sidebar.connectSSH": "Подключиться по SSH",
+  "sidebar.connectToWorkspace": "Подключиться в рабочей области",
   "sidebar.connectSftp": "Подключиться по SFTP",
   "sidebar.connectScp": "Подключиться по SCP",
   "sidebar.connectFtp": "Подключиться по FTP",
