@@ -158,9 +158,9 @@ import { useI18n } from '../i18n'
 import {
   SftpListRemote, SftpListLocal, SftpListLocalDrives,
   SftpChangeRemoteDir, SftpChangeLocalDir,
-  SftpGet, SftpPut,
   SftpOpenExternalEditor, OpenExternalEditorLocal, ListSessions,
 } from '../../bindings/github.com/ys-ll/uniterm/app'
+
 import FileList from './FileList.vue'
 import TransferPanel from './TransferPanel.vue'
 import FileChmodDialog from './FileChmodDialog.vue'
@@ -170,8 +170,8 @@ import FileConflictDialog from './FileConflictDialog.vue'
 import type { FileItem } from './FileList.vue'
 import {
   useFilePanel, useConflictDialog, useFileDialogs, useFileListing, useChmodDialog,
-  useEditorBridge, useNativeFileDrop, remoteFileOps, localFileOps,
-  resolveRemoteTarget, resolveLocalTarget, joinPath, autoRename,
+  useEditorBridge, useNativeFileDrop, remoteFileOps, localFileOps, createSendToOther,
+  resolveRemoteTarget, resolveLocalTarget, joinPath,
 } from '../composables/useFilePanel'
 import { reconnectFileTransferPanel, isPanelReconnecting } from '../composables/usePanelReconnect'
 import { isConnectionLostError, supportsRemoteSymlink } from '../utils/fileTransferUtils'
@@ -237,7 +237,7 @@ const { chmodVisible, chmodItem, onChmod, onChmodConfirm } = chmod
 
 // ── Shared per-panel logic (clipboard, dialogs, file ops) — one instance per pane ──
 const conflicts = useConflictDialog()
-const { conflictVisible, conflictFiles, onConflictResolve, resolveConflicts } = conflicts
+const { conflictVisible, conflictFiles, onConflictResolve } = conflicts
 const fileDialogs = useFileDialogs()
 const { dlg: genDlg, onGenericConfirm, onGenericCancel } = fileDialogs
 
@@ -486,49 +486,27 @@ async function doInitialAutoNav() {
   }
 }
 
-async function onSendToRemote(items: FileItem[]) {
-  const sid = panel.value?.sessionId
-  if (!sid) return
-
-  const fileNames = items.filter(i => i.name !== '..').map(i => i.name)
-  const action = await resolveConflicts(fileNames, remoteFiles.value.map(f => f.name))
-  if (action === 'cancel') return
-
-  const existingNames = remoteFiles.value.map(f => f.name)
-  for (const item of items) {
-    if (item.name === '..') continue
-    let resolvedName = item.name
-    if (action === 'rename' && existingNames.includes(item.name)) {
-      resolvedName = autoRename(item.name, existingNames)
-    }
-    existingNames.push(resolvedName)
-    const localPath = joinPath(localCwd.value, item.name)
-    const remotePath = cwd.value + '/' + resolvedName
-    SftpPut(sid, localPath, remotePath, item.isDir)
-  }
-}
-
-async function onSendToLocal(items: FileItem[]) {
-  const sid = panel.value?.sessionId
-  if (!sid) return
-
-  const fileNames = items.filter(i => i.name !== '..').map(i => i.name)
-  const action = await resolveConflicts(fileNames, localFiles.value.map(f => f.name))
-  if (action === 'cancel') return
-
-  const existingNames = localFiles.value.map(f => f.name)
-  for (const item of items) {
-    if (item.name === '..') continue
-    let resolvedName = item.name
-    if (action === 'rename' && existingNames.includes(item.name)) {
-      resolvedName = autoRename(item.name, existingNames)
-    }
-    existingNames.push(resolvedName)
-    const remotePath = joinPath(cwd.value, item.name)
-    const localPath = joinPath(localCwd.value, resolvedName).replace(/\\/g, '/')
-    SftpGet(sid, remotePath, localPath, item.isDir)
-  }
-}
+// Send-to-other (context menu) and cross-pane drag-drop share one transfer
+// implementation per direction (see createSendToOther): the source pane
+// provides the files, the target pane receives them.
+const onSendToRemote = createSendToOther({
+  sid: () => panel.value?.sessionId ?? undefined,
+  direction: 'toRemote',
+  sourceCwd: localListing.cwd,
+  targetCwd: remoteListing.cwd,
+  targetFiles: remoteListing.files,
+  conflicts,
+  ops: remoteFileOps,
+})
+const onSendToLocal = createSendToOther({
+  sid: () => panel.value?.sessionId ?? undefined,
+  direction: 'toLocal',
+  sourceCwd: remoteListing.cwd,
+  targetCwd: localListing.cwd,
+  targetFiles: localListing.files,
+  conflicts,
+  ops: localFileOps,
+})
 
 // OS file drops (resource manager / desktop) arrive via Wails v3's native pipe.
 // Wails forwards the absolute local paths, which we upload directly from disk
@@ -603,24 +581,9 @@ async function onDropLocal(e: DragEvent) {
   if (!data) return
   try {
     const parsed = JSON.parse(data)
-    const items = parsed.items ? parsed.items : (parsed.name ? [{ name: parsed.name, isDir: !!parsed.isDir }] : [])
+    const items: FileItem[] = parsed.items ? parsed.items : (parsed.name ? [{ name: parsed.name, isDir: !!parsed.isDir }] : [])
     if (items.length === 0 || parsed.mode !== 'remote') return
-    const sid = panel.value?.sessionId
-    if (!sid) return
-    const fileNames = items.map((i: any) => i.name)
-    const action = await resolveConflicts(fileNames, localFiles.value.map(f => f.name))
-    if (action === 'cancel') return
-    const existingNames = localFiles.value.map(f => f.name)
-    for (const item of items) {
-      let resolvedName = item.name
-      if (action === 'rename' && existingNames.includes(item.name)) {
-        resolvedName = autoRename(item.name, existingNames)
-      }
-      existingNames.push(resolvedName)
-      const remotePath = joinPath(cwd.value, item.name)
-      const localPath = joinPath(localCwd.value, resolvedName).replace(/\\/g, '/')
-      SftpGet(sid, remotePath, localPath, item.isDir)
-    }
+    await onSendToLocal(items)
   } catch (e) { console.error('onDropLocal:', e) }
 }
 
@@ -641,22 +604,9 @@ async function onDropRemote(e: DragEvent) {
   if (!data) return
   try {
     const parsed = JSON.parse(data)
-    const items = parsed.items ? parsed.items : (parsed.name ? [{ name: parsed.name, isDir: !!parsed.isDir }] : [])
+    const items: FileItem[] = parsed.items ? parsed.items : (parsed.name ? [{ name: parsed.name, isDir: !!parsed.isDir }] : [])
     if (items.length === 0 || parsed.mode !== 'local') return
-    const fileNames = items.map((i: any) => i.name)
-    const action = await resolveConflicts(fileNames, remoteFiles.value.map(f => f.name))
-    if (action === 'cancel') return
-    const existingNames = remoteFiles.value.map(f => f.name)
-    for (const item of items) {
-      let resolvedName = item.name
-      if (action === 'rename' && existingNames.includes(item.name)) {
-        resolvedName = autoRename(item.name, existingNames)
-      }
-      existingNames.push(resolvedName)
-      const localPath = joinPath(localCwd.value, item.name)
-      const remotePath = cwd.value + '/' + resolvedName
-      SftpPut(panel.value?.sessionId!, localPath, remotePath, item.isDir)
-    }
+    await onSendToRemote(items)
   } catch (e) { console.error('onDropRemote:', e) }
 }
 </script>

@@ -216,6 +216,66 @@ export const localFileOps: FilePanelOps = {
   chmod: SftpChmod,
 }
 
+// --- Unified "send to the other pane" ---------------------------------------
+
+/** Creates the shared "send these items to the other pane" handler used by
+ *  both the context-menu action and the cross-pane drag-drop. Filters '..',
+ *  prompts once per batch for name conflicts, auto-renames on 'rename' (with
+ *  a growing existing-names list), then fires each transfer without awaiting
+ *  it — completion refreshes go through the transferEvents onDone hook.
+ *
+ *  Role of the cwds: the source pane provides the files (its cwd builds the
+ *  remote/source path with the item's original name), the target pane
+ *  receives them (its cwd builds the destination path with the resolved
+ *  name). 'toRemote' uploads local → remote, 'toLocal' downloads remote →
+ *  local. */
+export function createSendToOther(opts: {
+  sid: () => string | undefined
+  direction: 'toRemote' | 'toLocal'
+  sourceCwd: { value: string }
+  targetCwd: { value: string }
+  targetFiles: { value: FileItem[] }
+  conflicts: ConflictDialog
+  ops: FilePanelOps
+}): (items: FileItem[]) => Promise<void> {
+  return async (items: FileItem[]) => {
+    const id = opts.sid()
+    if (!id) return
+
+    const fileNames = items.filter(i => i.name !== '..').map(i => i.name)
+    const action = await opts.conflicts.resolveConflicts(
+      fileNames,
+      opts.targetFiles.value.map(f => f.name),
+    )
+    if (action === 'cancel') return
+
+    const existingNames = opts.targetFiles.value.map(f => f.name)
+    for (const item of items) {
+      if (item.name === '..') continue
+      let resolvedName = item.name
+      if (action === 'rename' && existingNames.includes(item.name)) {
+        resolvedName = autoRename(item.name, existingNames)
+      }
+      existingNames.push(resolvedName)
+      if (opts.direction === 'toRemote') {
+        opts.ops.put(
+          id,
+          joinPath(opts.sourceCwd.value, item.name),
+          opts.targetCwd.value + '/' + resolvedName,
+          item.isDir,
+        )
+      } else {
+        opts.ops.get(
+          id,
+          joinPath(opts.sourceCwd.value, item.name),
+          joinPath(opts.targetCwd.value, resolvedName).replace(/\\/g, '/'),
+          item.isDir,
+        )
+      }
+    }
+  }
+}
+
 // --- The panel composable ---------------------------------------------------
 
 export interface FilePanelOptions {
