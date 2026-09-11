@@ -1562,7 +1562,7 @@ function normalizeForm(): ConnectionConfig {
   if (redisSentinel) {
     if (!normalized.redisSentinels?.trim()) throw new Error(t('conn.redisSentinelsRequired'))
     if (!normalized.redisMasterName?.trim()) throw new Error(t('conn.redisMasterNameRequired'))
-  } else if (normalized.type !== 'local' && normalized.type !== 'serial' && normalized.type !== 'k8s' && normalized.type !== 'container' && !normalized.host.trim()) {
+  } else if (normalized.type !== 'local' && normalized.type !== 'wsl' && normalized.type !== 'serial' && normalized.type !== 'k8s' && normalized.type !== 'container' && !normalized.host.trim()) {
     throw new Error(t('conn.hostRequired'))
   }
   if (normalized.type === 's3') {
